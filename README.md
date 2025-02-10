@@ -1,1 +1,1 @@
-# Research-AI
+# Research AI
