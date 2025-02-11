@@ -16,16 +16,15 @@ class database:
         self.__client = MongoClient(os.getenv("MONGODB_URI"))
         self.__collection = self.__client["LangChain"]["vectors"]
         self.__embeddingModel = GoogleGenerativeAIEmbeddings(model = "models/text-embedding-004", google_api_key = os.getenv("GEMINI_API_KEY"))
-        self.__splitter = RecursiveCharacterTextSplitter(chunk_size = 700, chunk_overlap = 100)
+        self.__splitter = RecursiveCharacterTextSplitter(chunk_size = 600, chunk_overlap = 100)
         self.__vectorSearch = MongoDBAtlasVectorSearch(collection = self.__collection, embedding = self.__embeddingModel)
         self.__retriever = self.__vectorSearch.as_retriever(search_type = "mmr", search_kwargs = {"k" : 6})
 
     def add_data(self, documents: list) -> None:
         try:
-            for doc in documents:
-                self.__splittedDocs = self.__splitter.split_documents(doc)
-                uuids = [str(uuid4()) for _ in range(len(self.__splittedDocs))]
-                self.__vectorSearch.aadd_documents(self.__splittedDocs, ids = uuids)
+            self.__splittedDocs = self.__splitter.split_documents(documents)
+            uuids = [str(uuid4()) for _ in range(len(self.__splittedDocs))]
+            self.__vectorSearch.add_documents(self.__splittedDocs, ids = uuids)
         except Exception as error:
             raise error
 
