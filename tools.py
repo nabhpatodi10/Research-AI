@@ -25,3 +25,8 @@ class tools:
         file = open("sample.txt", "a")
         file.write(content)
         file.close()
+
+    def close_tools(self) -> None:
+        self.__database.close_connection()
+        del self.__database
+        del self.__search

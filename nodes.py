@@ -10,7 +10,7 @@ class Nodes:
                 trends or news or current affairs, history of that topic or comparisons or gethering existing studies or researches done on same or similar topics and more \
                 depending on the topic to perfom a very detailed and extensive research. The research topic and what kind of a document has to be made from the research will \
                 be given to you, the search queries should be made keeping in mind both the things.
-                Give the output as a python list containing only these 10 search queries, nothing else."""
+                Give the output as a list containing only these 10 search queries as individual string elements, nothing else."""
             ),
             HumanMessage(
                 content = f"""Give me the search queries for the following topic and the following document type:\
@@ -33,7 +33,7 @@ class Nodes:
                 will be placed under these. Also keep in mind that all search queries might not produce results which the query aims for, and the information collected might \
                 be around those search queries as well. So the topics or sub-topics or headings or sub-headings must not only be dependent on these search queries but majorly \
                 on the main topic and the type of document, the search queries are only to give you a very slight idea about the information collected.
-                Give the output as a python list containing only these headings or sub-headings or topics or sub-topics and nothing else."""
+                Give the output as a list containing only these headings or sub-headings or topics or sub-topics as individual string elements and nothing else."""
             ),
             HumanMessage(
                 content = f"""Give me the headings or sub-headings or topics or sub-topics for the following main topic and the following document type:\
@@ -63,7 +63,7 @@ class Nodes:
                 required headings, sub-headings, topics or sub-topics to the previous structure or remove the non required ones. But before you do that, be very careful to not \
                 remove the first {index} headings, sub-headings, topics or sub-topics as the content for those has already been generated and finalised and that cannot be \
                 changed.
-                Give the output as a python list containing only these headings or sub-headings or topics or sub-topics and nothing else."""
+                Give the output as a list containing only these headings or sub-headings or topics or sub-topics as individual string elements and nothing else."""
             ),
             HumanMessage(
                 content = f"""Give me the headings or sub-headings or topics or sub-topics for the following main topic and the following document type:\
@@ -91,7 +91,7 @@ class Nodes:
                 sub-heading or topic or sub-topic such that proper content can be generated based on that information for the given document type Note that same process will \
                 be repeated for other topics as well, so the vector store search queries must only focus on getting information which can be written under the give heading or \
                 sub-heading or topic or sub-topic for the given type of document.
-                Give the output as a python list containing only these 6 vector store search queries, nothing else."""
+                Give the output as a list containing only these 6 vector store search queries as individual string elements, nothing else."""
             ),
             HumanMessage(
                 content = f"""Give me the vector store search queries for the following main topic which should aim to gather information under the following heading or \
@@ -114,8 +114,8 @@ class Nodes:
                 content and the entire knowledge base which you have to refer while writing that content. Keep in mind that you strictly have to stick to the given heading or \
                 sub-heading or topic or sub-topic for which you have to write the content and whatever you write should be from the knowledge base given, do not make things up \
                 on your own and do not write things which are not in the given knowledge base. Keep in mind that this is a research document of {output_format} format so you \
-                have write a very detailed, lengthy and accurate content which should completely be based on the knowledge base given. Use proper new line characters for new \
-                paragraphs and divide the content into paragraphs, do not give a single lengthy paragraph."""
+                have to write an extremely detailed, lengthy and accurate content which should completely be based on the knowledge base given. Use proper new line characters \
+                for new paragraphs and divide the content into paragraphs, do not give a single lengthy paragraph."""
             ),
             HumanMessage(
                 content = f"""Write the content for the researh document of the following main topic, following heading or Sub-heading or topic or sub-topic, with the \

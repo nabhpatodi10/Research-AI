@@ -17,4 +17,5 @@ class search:
                 documents.append(doc)
             return documents
         except Exception as error:
+            print(i)
             raise error

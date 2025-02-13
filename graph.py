@@ -1,4 +1,5 @@
-from typing import TypedDict, Annotated
+import time
+from typing import TypedDict, Annotated, List
 from pydantic import Field
 import operator
 from langchain_core.messages import SystemMessage, HumanMessage, AnyMessage
@@ -11,16 +12,16 @@ from nodes import Nodes
 class GraphSchema(TypedDict):
     topic: str
     output_format: str
-    plan: list[str]
-    queries: Annotated[list[AnyMessage], operator.add]
+    plan: List[str]
+    queries: Annotated[List[AnyMessage], operator.add]
     index: int
-    documents: list[Document]
+    documents: List[Document]
 
 class QuerySchema(TypedDict):
-    search_queries: list[str] = Field(description = "A list of all the search queries which have to be used to search for information on the internet.")
+    search_queries: List[str] = Field(description = "A list of all the search queries as individual elements which have to be used to search for information on the internet.", min_length = 10)
 
 class PlanSchema(TypedDict):
-    plan: list[str] = Field(description = "A list of all the headings, topics and sub-topics which are to be included in the final document and under which the entire content has to be organised.")
+    plan: List[str] = Field(description = "A list of all the headings, topics and sub-topics which are to be included in the final document and under which the entire content has to be organised.")
 
 class BooleanSchema(TypedDict):
     check: bool = Field(description = "A boolean value given as output based on which further events occur.")
@@ -32,7 +33,7 @@ class ContentSchema(TypedDict):
 class Graph:
 
     def __init__(self, model):
-        self.__tools = tools()
+        self.tools = tools()
         self.__nodes = Nodes()
         graph = StateGraph(GraphSchema)
         graph.add_node("generate_search_queries", self.__generate_search_queries)
@@ -61,12 +62,10 @@ class Graph:
 
     def __generate_search_queries(self, state: GraphSchema):
 
-        queries = self.__model.with_structured_output(QuerySchema).invoke(self.__nodes.generate_search_queries(state["topic"], state["output_format"]))
+        queries = self.__model.with_structured_output(schema = QuerySchema, method = "json_schema").invoke(self.__nodes.generate_search_queries(state["topic"], state["output_format"]))
         
         for query in queries["search_queries"]:
-            self.__tools.web_search_tool(query)
-
-        print(queries["search_queries"])
+            self.tools.web_search_tool(query)
 
         return {"queries" : queries["search_queries"]}
 
@@ -76,25 +75,21 @@ class Graph:
         else:
             messages = self.__nodes.first_plan_document(state["topic"], state["output_format"], state["queries"])
 
-        plan = self.__model.with_structured_output(PlanSchema).invoke(messages)
-
-        print(plan["plan"])
+        plan = self.__model.with_structured_output(schema = PlanSchema, method = "json_schema").invoke(messages)
 
         return {"plan" : plan["plan"]}
     
     def __retrieve_documents(self, state: GraphSchema):
         
-        queries = self.__model.with_structured_output(QuerySchema).invoke(self.__nodes.generate_vector_queries(state["topic"], state["output_format"], state["plan"][state["index"]]))
+        queries = self.__model.with_structured_output(schema = QuerySchema, method = "json_schema").invoke(self.__nodes.generate_vector_queries(state["topic"], state["output_format"], state["plan"][state["index"]]))
 
         documents = []
 
         for query in queries["search_queries"]:
-            docs = self.__tools.vector_search_tool(query)
+            docs = self.tools.vector_search_tool(query)
             for doc in docs:
                 if doc not in documents:
                     documents.append(doc)
-
-        print("Documents Retrieved")
 
         return {"documents" : documents}
     
@@ -106,19 +101,17 @@ class Graph:
         for document in documents:
             information += f"\n{document.page_content}"
 
-        content = self.__model.with_structured_output(ContentSchema).invoke(self.__nodes.generate_content(state["topic"], state["output_format"], state["plan"][state["index"]], information))
+        content = self.__model.with_structured_output(schema = ContentSchema, method = "json_schema").invoke(self.__nodes.generate_content(state["topic"], state["output_format"], state["plan"][state["index"]], information))
 
-        self.__tools.write_in_file_tool(content.heading + "\n" + content.content)
+        self.tools.write_in_file_tool(content["heading"] + "\n" + content["content"])
 
         index = state["index"]
-
-        print(f"Content generated for index: {index}")
 
         return {"index" : index + 1}
     
     def __planning_check(self, state: GraphSchema) -> bool:
         if len(state["plan"]) > 0:
-            return self.__model.with_structured_output(BooleanSchema).invoke(self.__nodes.planning_check(state["topic"], state["output_format"], state["queries"], state["plan"]))
+            return self.__model.with_structured_output(schema = BooleanSchema, method = "json_schema").invoke(self.__nodes.planning_check(state["topic"], state["output_format"], state["queries"], state["plan"]))["check"]
         else:
             return True
         
@@ -127,7 +120,11 @@ class Graph:
         for document in state["documents"]:
             information += f"\n{document.page_content}"
 
-        return self.__model.with_structured_output(BooleanSchema).invoke(self.__nodes.information_check(state["topic"], state["output_format"], state["plan"][state["index"]], information))
-    
+        info_check = self.__model.with_structured_output(schema = BooleanSchema, method = "json_schema").invoke(self.__nodes.information_check(state["topic"], state["output_format"], state["plan"][state["index"]], information))["check"]
+        if not info_check:
+            state["topic"] = state["plan"][state["index"]]
+        
+        return info_check
+
     def __heading_left_check(self, state: GraphSchema) -> bool:
         return state["index"] < len(state["plan"])

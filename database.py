@@ -34,6 +34,6 @@ class database:
             return self.__retriever.invoke(query)
         except Exception as error:
             raise error
-    
-    def __del__(self):
+        
+    def close_connection(self) -> None:
         self.__client.close()
