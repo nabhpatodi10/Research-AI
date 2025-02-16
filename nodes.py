@@ -86,16 +86,18 @@ class Nodes:
         messages = [
             SystemMessage(
                 content = """You are an expert in generating search queries to gather information from vector stores which contain information about the given topic. Your job \
-                is to generate exactly 6 search queries on a given main topic and a specific heading or sub-heading or topic or sub-topic related to the given topic which will \
-                be a part of the final document. These vector store search queries should aim to gather maximum information about the main topic under the given heading or \
-                sub-heading or topic or sub-topic such that proper content can be generated based on that information for the given document type Note that same process will \
-                be repeated for other topics as well, so the vector store search queries must only focus on getting information which can be written under the give heading or \
-                sub-heading or topic or sub-topic for the given type of document.
-                Give the output as a list containing only these 6 vector store search queries as individual string elements, nothing else."""
+                is to generate exactly 10 search queries on a given main topic and a specific heading or sub-heading or topic or sub-topic related to the given topic which will \
+                be a part of the final document. These vector store search queries should aim to gather maximum information about the given heading or sub-heading or topic or \
+                sub-topic under the main topic such that proper content can be generated for the given heading or sub-heading or topic or sub-topic based on that information \
+                for the given document type. Note that same process will be repeated for other topics as well, so the vector store search queries must only focus on getting \
+                information which can be written under the given heading or sub-heading or topic or sub-topic for the given type of document. These queries have to be keywords \
+                or phrases which you are looking for, do not go for AND, OR, NOT operators in these queries, these queries are only supposed to be simple string values for \
+                which the search will be done. These strings will be used as it is for searching so the output should only be the search queries.
+                Give the output as a list containing only these 10 vector store search queries as individual string elements, nothing else."""
             ),
             HumanMessage(
-                content = f"""Give me the vector store search queries for the following main topic which should aim to gather information under the following heading or \
-                sub-heading or topic or sub-topic and the following document type:\
+                content = f"""Give me the vector store search queries for the following main topic which should aim to gather maximum important information under the following \
+                heading or sub-heading or topic or sub-topic and the following document type:\
                 
                 Main Topic: {topic}\
                 
@@ -106,16 +108,19 @@ class Nodes:
         ]
         return messages
     
-    def generate_content(self, topic: str, output_format: str, heading: str, information: str):
+    def generate_content(self, topic: str, plan: str, heading: str, information: str):
         messages = [
             SystemMessage(
-                content = f"""You are an expert in writing content for {output_format}. Your job is to write a part of a research document which is of the format \
-                {output_format}. You will be given the main topic of the document, the heading or sub-heading or topic or sub-topic under which you will have to write the \
-                content and the entire knowledge base which you have to refer while writing that content. Keep in mind that you strictly have to stick to the given heading or \
-                sub-heading or topic or sub-topic for which you have to write the content and whatever you write should be from the knowledge base given, do not make things up \
-                on your own and do not write things which are not in the given knowledge base. Keep in mind that this is a research document of {output_format} format so you \
-                have to write an extremely detailed, lengthy and accurate content which should completely be based on the knowledge base given. Use proper new line characters \
-                for new paragraphs and divide the content into paragraphs, do not give a single lengthy paragraph."""
+                content = f"""You are an expert in writing content for research documents. Your job is to write a part of a research document in extreme detail and accuracy. \
+                You will be given the main topic of the document, the structure of the document which will be a list of all the headings and sub-headings of the document, the \
+                heading or sub-heading under which you will have to write the content and the entire knowledge base which you have to refer while writing that content. Keep in \
+                mind that you strictly have to stick to the mentioned heading or sub-heading for which you have to write the content and whatever you write should be from the \
+                knowledge base given, do not make things up on your own and do not write things which are not in the given knowledge base. Keep in mind that this is a research \
+                document so you have to write an extremely detailed, lengthy and accurate content which should completely be based on the knowledge base given. Use proper new \
+                line characters for new paragraphs and divide the content into paragraphs, do not give a single lengthy paragraph. Do not use html tags like <p> or <h> or <ol> \
+                or <ul> or any kind of scripting language, the output should be simple text containing the heading and the detailed, lengthy, acurate, factual and paragraphed \
+                content. Remember to strictly follow the heading or sub-heading, you only have to write about that and focus on writing as much as possible on it. The given \
+                heading or sub-heading should be the heading for your generated content."""
             ),
             HumanMessage(
                 content = f"""Write the content for the researh document of the following main topic, following heading or Sub-heading or topic or sub-topic, with the \
@@ -123,11 +128,11 @@ class Nodes:
                 
                 Main Topic: {topic}\
                 
-                Heading or Sub-heading or topic or sub-topic: {heading}
+                Document Structure: {plan}\
+                
+                Heading or Sub-heading on which you have to generate content: {heading}\
 
-                Knowledge Base: {information}
-
-                Output Document: {output_format}"""
+                Knowledge Base: {information}"""
             )
         ]
         return messages
@@ -167,8 +172,8 @@ class Nodes:
                 content = f"""You are an expert in analysing whether the given knowledge base is good enough for a research document of the given main topic, given heading or \
                 sub-heading or topic or sub-topic and the given output document type. Your job is to analyse the knowledge base and tell if it is good enough or not based on \
                 the given the main topic of the document, the heading or sub-heading or topic or sub-topic and output document type. Keep in mind that this knowledge base will \
-                used to write the content under the given heading or sub-heading or topic or sub-topic in the future so if the knowledge base is not suffcient or doesn't have \
-                good quality or accurate information, then it should be changed.
+                be used to write the content under the given heading or sub-heading or topic or sub-topic in the future so if the knowledge base is not suffcient or doesn't \
+                have good quality or accurate information, then it should be changed.
                 Give the output as a boolean value where True means that the knowledge base is good enough to write the content based on it and False means that the knowledge \
                 base is not good enough and that improvements should be made to it before writing the content based on it."""
             ),
@@ -183,6 +188,36 @@ class Nodes:
                 Knowledge Base: {information}
 
                 Output Document: {output_format}"""
+            )
+        ]
+        return messages
+    
+    def content_check(self, topic: str, output_format: str, heading: str, information: str, content: str):
+        messages = [
+            SystemMessage(
+                content = f"""You are an expert in analysing whether the given content is good enough for a research document of the given main topic, given heading or \
+                sub-heading or topic or sub-topic, the knowledge base used to generate that content and the given output document type. Your job is to analyse the content and \
+                tell if it is good enough or not based on the given the main topic of the document, the heading or sub-heading or topic or sub-topic, the knowledge base used to \
+                generate that content and output document type. Keep in mind that this content will be a part of a very important research document and if it is not up to the \
+                mark with the quality of information or if there are any factual mistakes in the content based on the knowledge base given, then it should be changed. Also if \
+                the content doesn't have all the information which it should have based on the knowledge base or if the content is too short based on the given heading and the \
+                knowledge base, then it should be re-written
+                Give the output as a boolean value where True means that the content is good enough to be a part of the research document and False means that the content \
+                is not good enough and that improvements should be made to it before adding it to the research document."""
+            ),
+            HumanMessage(
+                content = f"""Analyse the content for the researh document of the following main topic, following heading or sub-heading or topic or sub-topic, following \
+                knowledge base with the following type of output document:\
+                
+                Main Topic: {topic}\
+                
+                Heading or Sub-heading or topic or sub-topic: {heading}
+
+                Knowledge Base: {information}
+
+                Output Document: {output_format}
+
+                Content to be analysed: {content}"""
             )
         ]
         return messages

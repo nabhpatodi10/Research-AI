@@ -16,19 +16,36 @@ class GraphSchema(TypedDict):
     queries: Annotated[List[AnyMessage], operator.add]
     index: int
     documents: List[Document]
+    content: str
 
 class QuerySchema(TypedDict):
-    search_queries: List[str] = Field(description = "A list of all the search queries as individual elements which have to be used to search for information on the internet.", min_length = 10)
+    search_queries: List[str] = Field(
+        description = "A list of all the search queries as individual elements which have to be used to search for information on the internet.", 
+        min_length = 10
+    )
 
 class PlanSchema(TypedDict):
-    plan: List[str] = Field(description = "A list of all the headings, topics and sub-topics which are to be included in the final document and under which the entire content has to be organised.")
+    plan: List[str] = Field(
+        description = "A list of all the headings, topics and sub-topics which are to be included in the final document and under which the entire content has to be organised."
+    )
 
 class BooleanSchema(TypedDict):
-    check: bool = Field(description = "A boolean value given as output based on which further events occur.")
+    check: bool = Field(
+        description = "A boolean value given as output based on which further events occur."
+    )
 
 class ContentSchema(TypedDict):
-    heading: str = Field(description = "The heading, topic or sub-topic under which the content is being generated.")
-    content: str = Field(description = "The content which is being generated for the given heading, topic or sub-topic.")
+    heading: str = Field(
+        description = "The heading, topic or sub-topic under which the content is being generated."
+    )
+    content: str = Field(
+        description = "The content which is being generated for the given heading, topic or sub-topic."
+    )
+
+class SummarySchema(TypedDict):
+    summary: str = Field(
+        description = "The summary of the given part of the research document"
+    )
 
 class Graph:
 
@@ -40,6 +57,7 @@ class Graph:
         graph.add_node("plan_document", self.__plan_document)
         graph.add_node("retrieve_documents", self.__retrieve_documents)
         graph.add_node("generate_content", self.__generate_content)
+        graph.add_node("write_content", self.__write_content)
         graph.add_conditional_edges(
             "generate_search_queries",
             self.__planning_check,
@@ -52,6 +70,11 @@ class Graph:
         )
         graph.add_conditional_edges(
             "generate_content",
+            self.__content_check,
+            {True : "write_content", False : "generate_content"}
+        )
+        graph.add_conditional_edges(
+            "write_content",
             self.__heading_left_check,
             {True : "retrieve_documents", False : END}
         )
@@ -101,9 +124,17 @@ class Graph:
         for document in documents:
             information += f"\n{document.page_content}"
 
-        content = self.__model.with_structured_output(schema = ContentSchema, method = "json_schema").invoke(self.__nodes.generate_content(state["topic"], state["output_format"], state["plan"][state["index"]], information))
+        plan = str(state["plan"]).lstrip("[").rstrip("]").replace("'", "")
 
-        self.tools.write_in_file_tool(content["heading"] + "\n" + content["content"])
+        content = self.__model.with_structured_output(schema = ContentSchema, method = "json_schema").invoke(self.__nodes.generate_content(state["topic"], plan, state["output_format"], information))
+
+        return {"content" : content["heading"] + "\n" + content["content"]}
+    
+    def __write_content(self, state: GraphSchema):
+        
+        content = state["content"]
+
+        self.tools.write_in_file_tool(content)
 
         index = state["index"]
 
@@ -125,6 +156,13 @@ class Graph:
             state["topic"] = state["plan"][state["index"]]
         
         return info_check
+    
+    def __content_check(self, state: GraphSchema) -> bool:
+        information = ""
+        for document in state["documents"]:
+            information += f"\n{document.page_content}"
+
+        return self.__model.with_structured_output(schema = BooleanSchema, method = "json_schema").invoke(self.__nodes.content_check(state["topic"], state["output_format"], state["plan"][state["index"]], information, state["content"]))["check"]
 
     def __heading_left_check(self, state: GraphSchema) -> bool:
         return state["index"] < len(state["plan"])
