@@ -91,8 +91,9 @@ class Nodes:
                 sub-topic under the main topic such that proper content can be generated for the given heading or sub-heading or topic or sub-topic based on that information \
                 for the given document type. Note that same process will be repeated for other topics as well, so the vector store search queries must only focus on getting \
                 information which can be written under the given heading or sub-heading or topic or sub-topic for the given type of document. These queries have to be keywords \
-                or phrases which you are looking for, do not go for AND, OR, NOT operators in these queries, these queries are only supposed to be simple string values for \
-                which the search will be done. These strings will be used as it is for searching so the output should only be the search queries.
+                or phrases which you are looking for, do not go for AND, OR, NOT operators in these queries and do not use _ in between words, there can be multiple words in \
+                the search query, these queries are only supposed to be simple string values for which the search will be done. These strings will be used as it is for \
+                searching so the output should only be the search queries.
                 Give the output as a list containing only these 10 vector store search queries as individual string elements, nothing else."""
             ),
             HumanMessage(
@@ -113,12 +114,16 @@ class Nodes:
             SystemMessage(
                 content = f"""You are an expert in writing content for research documents. Your job is to write a part of a research document in extreme detail and accuracy. \
                 You will be given the main topic of the document, the structure of the document which will be a list of all the headings and sub-headings of the document, the \
-                heading or sub-heading under which you will have to write the content and the entire knowledge base which you have to refer while writing that content. Keep in \
-                mind that you strictly have to stick to the mentioned heading or sub-heading for which you have to write the content and whatever you write should be from the \
-                knowledge base given, do not make things up on your own and do not write things which are not in the given knowledge base. Keep in mind that this is a research \
-                document so you have to write an extremely detailed, lengthy and accurate content which should completely be based on the knowledge base given. Use proper new \
-                line characters for new paragraphs and divide the content into paragraphs, do not give a single lengthy paragraph. Do not use html tags like <p> or <h> or <ol> \
-                or <ul> or any kind of scripting language, the output should be simple text containing the heading and the detailed, lengthy, acurate, factual and paragraphed \
+                heading or sub-heading under which you will have to write the content which will be a part of the research document under that heading and the knowledge base \
+                which you have to refer while writing that content. Keep in mind that you strictly have to stick to the mentioned heading or sub-heading for which you have to \
+                write the content and whatever you write should be from the knowledge base given, do not make things up on your own and do not write things which are not in the \
+                given knowledge base. Keep in mind that you are writing a part of a very important research document so you have to write an extremely detailed, lengthy and \
+                accurate content which should completely be based on the knowledge base given but also keep in mind that the content you generate should be like a part of a \
+                research document under the given heading name, for example, if the given heading is 'introduction', then the generated content should be the introduction \
+                of that research document, if the given heading is 'A Comparitive Study between LangChain and LangGraph', then the generated content should talk about LangChain \
+                and LangGraph and show a comparitive study like it would in any similar research document, do not deviate off the heading or sub-heading. Use proper new line \
+                characters for new paragraphs and divide the content into paragraphs, do not give a single lengthy paragraph. Do not use html tags like <p> or <h> or <ol> or \
+                <ul> or any kind of scripting language, the output should be simple text containing the heading and the detailed, lengthy, acurate, factual and paragraphed \
                 content. Remember to strictly follow the heading or sub-heading, you only have to write about that and focus on writing as much as possible on it. The given \
                 heading or sub-heading should be the heading for your generated content."""
             ),
@@ -170,10 +175,14 @@ class Nodes:
         messages = [
             SystemMessage(
                 content = f"""You are an expert in analysing whether the given knowledge base is good enough for a research document of the given main topic, given heading or \
-                sub-heading or topic or sub-topic and the given output document type. Your job is to analyse the knowledge base and tell if it is good enough or not based on \
-                the given the main topic of the document, the heading or sub-heading or topic or sub-topic and output document type. Keep in mind that this knowledge base will \
-                be used to write the content under the given heading or sub-heading or topic or sub-topic in the future so if the knowledge base is not suffcient or doesn't \
-                have good quality or accurate information, then it should be changed.
+                sub-heading and the given output document type. Your job is to analyse the knowledge base and tell if it is good enough or not based on the given the main topic \
+                of the document, the heading or sub-heading and output document type. Keep in mind that this knowledge base will be used to write the content under the given \
+                heading or sub-heading for a very important research document in the future so if the knowledge base is not suffcient or doesn't have good quality or accurate \
+                information, then it should be changed. This knowledge base will only be used to generate the content under the given heading or sub-heading and not for the \
+                entire research document, so analyse the knowledge base accordingly. For exapmle, if the heading is 'introduction', then the knowledge base should have all the \
+                information which can be used to write the introduction of the research document, if the heading is 'A Comparitive Study between LangChain and LangGraph', then \
+                the knowledge base should have all the information about LangChain, LangGraph and enough information to write a comparitive study between the two according to \
+                the research document.
                 Give the output as a boolean value where True means that the knowledge base is good enough to write the content based on it and False means that the knowledge \
                 base is not good enough and that improvements should be made to it before writing the content based on it."""
             ),

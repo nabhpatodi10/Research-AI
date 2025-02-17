@@ -20,5 +20,5 @@ agent = Graph(model)
 
 topic = "Text Extraction and Recognition Algorithms"
 output_format = "professional report"
-print(agent.graph.invoke({"topic" : topic, "output_format" : output_format, "plan" : [], "index" : 0}, {"recursion_limit" : 100}))
+print(agent.graph.invoke({"topic" : topic, "output_format" : output_format, "plan" : [], "index" : 0, "need_more_documents" : False}, {"recursion_limit" : 100}))
 agent.tools.close_tools()

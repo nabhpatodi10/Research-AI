@@ -1,8 +1,7 @@
-import time
 from typing import TypedDict, Annotated, List
 from pydantic import Field
 import operator
-from langchain_core.messages import SystemMessage, HumanMessage, AnyMessage
+from langchain_core.messages import AnyMessage
 from langgraph.graph import StateGraph, END
 from langchain_core.documents import Document
 
@@ -16,6 +15,7 @@ class GraphSchema(TypedDict):
     queries: Annotated[List[AnyMessage], operator.add]
     index: int
     documents: List[Document]
+    need_more_documents: bool
     content: str
 
 class QuerySchema(TypedDict):
@@ -35,11 +35,8 @@ class BooleanSchema(TypedDict):
     )
 
 class ContentSchema(TypedDict):
-    heading: str = Field(
-        description = "The heading, topic or sub-topic under which the content is being generated."
-    )
     content: str = Field(
-        description = "The content which is being generated for the given heading, topic or sub-topic."
+        description = "The content which is being generated for the given heading or sub-heading"
     )
 
 class SummarySchema(TypedDict):
@@ -113,6 +110,9 @@ class Graph:
             for doc in docs:
                 if doc not in documents:
                     documents.append(doc)
+                    
+        if state["need_more_documents"]:
+            documents = state["documents"] + documents
 
         return {"documents" : documents}
     
@@ -126,9 +126,9 @@ class Graph:
 
         plan = str(state["plan"]).lstrip("[").rstrip("]").replace("'", "")
 
-        content = self.__model.with_structured_output(schema = ContentSchema, method = "json_schema").invoke(self.__nodes.generate_content(state["topic"], plan, state["output_format"], information))
+        content = self.__model.with_structured_output(schema = ContentSchema, method = "json_schema").invoke(self.__nodes.generate_content(state["topic"], plan, state["plan"][state["index"]], information))
 
-        return {"content" : content["heading"] + "\n" + content["content"]}
+        return {"content" : state["plan"][state["index"]] + "\n" + content["content"]}
     
     def __write_content(self, state: GraphSchema):
         
@@ -151,9 +151,14 @@ class Graph:
         for document in state["documents"]:
             information += f"\n{document.page_content}"
 
+        need_more_documents = False
+
         info_check = self.__model.with_structured_output(schema = BooleanSchema, method = "json_schema").invoke(self.__nodes.information_check(state["topic"], state["output_format"], state["plan"][state["index"]], information))["check"]
         if not info_check:
             state["topic"] = state["plan"][state["index"]]
+            need_more_documents = True
+
+        state["need_more_documents"] = need_more_documents
         
         return info_check
     

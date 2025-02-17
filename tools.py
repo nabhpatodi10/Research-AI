@@ -23,7 +23,7 @@ class tools:
     def write_in_file_tool(self, content: str) -> None:
         """Use this tool to write the generated content into a text file so that it can be saved."""
         file = open("sample.txt", "a")
-        file.write(content)
+        file.write(content + "\n")
         file.close()
 
     def close_tools(self) -> None:
