@@ -1,24 +1,18 @@
-from dotenv import load_dotenv
-load_dotenv()
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
-# from langchain_groq import ChatGroq
-from langchain_ollama import ChatOllama
-from langchain_core.callbacks import CallbackManager, StreamingStdOutCallbackHandler
+app = FastAPI()
 
-from graph import Graph
+# Serve static files from the "static" directory
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-model = ChatOllama(model = "llama3.2:3b-instruct-fp16",
-                   verbose = True, streaming = True,
-                   callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]),
-                   num_thread=8,
-                   num_batch = 512,
-                   num_gpu=1)
-
-# model = ChatGroq(model = "llama-3.3-70b-versatile", verbose = True, streaming = True)
-
-agent = Graph(model)
-
-topic = "Text Extraction and Recognition Algorithms"
-output_format = "professional report"
-print(agent.graph.invoke({"topic" : topic, "output_format" : output_format, "plan" : [], "index" : 0, "need_more_documents" : False}, {"recursion_limit" : 100}))
-agent.tools.close_tools()
+@app.get("/", response_class=HTMLResponse)
+async def read_index():
+    # Optionally redirect to login page:
+    with open("static/login.html", "r", encoding="utf-8") as f:
+        return f.read()
+    
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app)
