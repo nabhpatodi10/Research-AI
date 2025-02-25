@@ -1,18 +1,18 @@
 from database import database
-from search import search
+from custom_search import custom_search
 
 class tools:
 
     __database: database
-    __search: search
+    __search: custom_search
 
     def __init__(self):
         self.__database = database()
-        self.__search = search()
+        self.__search = custom_search()
 
     def web_search_tool(self, query: str) -> None:
         """Web search tool to search the internet for information based on the given search query and automatically stores the information in a vector store"""
-        documents = self.__search.search_results(query)
+        documents = self.__search.search(query)
         self.__database.add_data(documents)
 
     def vector_search_tool(self, query: str) -> list:
