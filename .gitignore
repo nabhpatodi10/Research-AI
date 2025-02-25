@@ -1,5 +1,3 @@
 .env
 __pycache__
 sample.txt
-token.json
-credentials.json
