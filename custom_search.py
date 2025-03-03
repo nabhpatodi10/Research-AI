@@ -1,6 +1,4 @@
 import os
-from dotenv import load_dotenv
-load_dotenv()
 from googleapiclient.discovery import build
 from bs4 import BeautifulSoup
 from langchain_core.documents import Document
@@ -13,12 +11,12 @@ class CustomSearch:
         self.__creds = self.__auth.cred_token_auth()
         self.__service = build("customsearch", "v1", credentials=self.__creds)
     
-    def search(self, query: str) -> list[Document]:
+    def search(self, query: str, num: int) -> list[Document]:
         try:
             search = self.__service.cse().list(
                 cx=os.getenv("SEARCH_ENGINE_ID"),
                 lr="lang_en",
-                num=4,
+                num=num,
                 q=query,
                 c2coff=1,
                 orTerms="Research Paper|Article|Research Article|Research",
@@ -38,28 +36,24 @@ class CustomSearch:
                 page = context.new_page()
                 
                 for item in items:
-                    title = item["title"]
-                    url = item["link"]
-                    page.goto(url, timeout=60000)
-                    # Wait until the network is idle
-                    page.wait_for_load_state("networkidle", timeout=60000)
-                    html = page.content()
-                    soup = BeautifulSoup(html, "html.parser")
-                    text_elements = soup.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6"])
-                    text = "\n".join([elem.get_text(strip=True) for elem in text_elements])
-                    document = Document(page_content=f"{title}\n\n{text}",
-                                        metadata={"source": url})
-                    documents.append(document)
-                
+                    try:
+                        title = item["title"]
+                        url = item["link"]
+                        page.goto(url, timeout=30000)
+                        html = page.content()
+                        soup = BeautifulSoup(html, "html.parser")
+                        text_elements = soup.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6"])
+                        text = "\n".join([elem.get_text(strip=True) for elem in text_elements])
+                        if text and len(text) < 1000:
+                            continue
+                        document = Document(page_content=f"{title}\n\n{text}",
+                                            metadata={"source": url})
+                        documents.append(document)
+                    except:
+                        continue
+
                 browser.close()
             return documents
         
         except Exception as error:
             raise error
-
-if __name__ == "__main__":
-    cs = CustomSearch()
-    docs = cs.search("Text Extraction and Recognition Algorithms")
-    for doc in docs:
-        print("Source: ", doc.metadata["source"])
-        print("Content: ", doc.page_content, "\n")
