@@ -1,6 +1,6 @@
 import os
 from pymongo import MongoClient
-from langchain_mongodb import MongoDBAtlasVectorSearch
+from langchain_mongodb import MongoDBAtlasVectorSearch, MongoDBChatMessageHistory
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from uuid import uuid4
@@ -21,7 +21,7 @@ class database:
         self.__vectorSearch = MongoDBAtlasVectorSearch(collection = self.__collection, embedding = self.__embeddingModel)
         self.__retriever = self.__vectorSearch.as_retriever(search_type = "mmr", search_kwargs = {"k" : 10})
 
-    def add_data(self, documents: list) -> None:
+    def add_data(self, documents: list[Document]) -> None:
         try:
             self.__splittedDocs = self.__splitter.split_documents(documents)
             uuids = [str(uuid4()) for _ in range(len(self.__splittedDocs))]
