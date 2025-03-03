@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Feedback - My App</title>
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <style>
+    body {
+      background-color: #f8f9fa;
+    }
+    .feedback-container {
+      margin-top: 50px;
+    }
+    .card {
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container feedback-container">
+    <div class="row justify-content-center">
+      <div class="col-md-8 col-lg-6">
+        <div class="card p-4">
+          <h2 class="card-title text-center mb-4">We Value Your Feedback!</h2>
+          <p class="text-center text-muted">Let us know what you think about our service.</p>
+          <form id="feedback-form">
+            <div class="mb-3">
+              <label for="feedback-name" class="form-label">Name</label>
+              <input type="text" id="feedback-name" class="form-control" placeholder="Your Name" required>
+            </div>
+            <div class="mb-3">
+              <label for="feedback-email" class="form-label">Email</label>
+              <input type="email" id="feedback-email" class="form-control" placeholder="Your Email" required>
+            </div>
+            <div class="mb-3">
+              <label for="feedback-message" class="form-label">Feedback</label>
+              <textarea id="feedback-message" class="form-control" placeholder="Your Feedback" rows="5" required></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary w-100">Submit Feedback</button>
+          </form>
+          <div id="feedback-success" class="alert alert-success mt-3 d-none" role="alert">
+            Thank you for your feedback!
+          </div>
+          <div id="feedback-error" class="alert alert-danger mt-3 d-none" role="alert">
+            There was an error submitting your feedback. Please try again later.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Replace the values below with your Firebase project configuration
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT_ID.appspot.com",
+      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    // Handle feedback form submission
+    document.getElementById("feedback-form").addEventListener("submit", function(e) {
+      e.preventDefault();
+      
+      // Retrieve form values
+      const name = document.getElementById("feedback-name").value.trim();
+      const email = document.getElementById("feedback-email").value.trim();
+      const feedback = document.getElementById("feedback-message").value.trim();
+
+      // Save the feedback to Firestore under a collection called "feedback"
+      db.collection("feedback").add({
+        name: name,
+        email: email,
+        feedback: feedback,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      })
+      .then(() => {
+        // Show success message and reset form
+        document.getElementById("feedback-success").classList.remove("d-none");
+        document.getElementById("feedback-error").classList.add("d-none");
+        document.getElementById("feedback-form").reset();
+      })
+      .catch((error) => {
+        console.error("Error adding feedback: ", error);
+        document.getElementById("feedback-error").classList.remove("d-none");
+        document.getElementById("feedback-success").classList.add("d-none");
+      });
+    });
+  </script>
+
+  <!-- Bootstrap JS Bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
