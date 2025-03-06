@@ -1,18 +1,15 @@
 from database import database
 from custom_search import CustomSearch
 from langchain_core.documents import Document
-from nodes import Nodes
 
 class tools:
 
     __database: database
     __search: CustomSearch
-    __nodes: Nodes
 
     def __init__(self):
         self.__database = database()
         self.__search = CustomSearch()
-        self.__nodes = Nodes()
 
     def web_search_tool(self, queries: dict) -> list[Document]:
         docs = []

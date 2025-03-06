@@ -42,7 +42,9 @@ class Outline(BaseModel):
 class Related_Topics(BaseModel):
     topics: List[str] = Field(
         default_factory=list,
-        title="List of related topics."
+        title="List of related topics.",
+        min_length=5,
+        max_length=10
     )
 
 class Editor(BaseModel):
@@ -67,25 +69,19 @@ class Editor(BaseModel):
 class Perspectives(BaseModel):
     editors: List[Editor] = Field(
         description="Comprehensive list of editors with their roles and affiliations.",
-        max_length=10
+        min_length=2,
+        max_length=6
     )
 
 class ContentSection(BaseModel):
     section_title: str = Field(..., title="Title of the section")
     content: str = Field(..., title="Full content of the section")
-    subsections: Optional[List[OutlineSubsection]] = Field(
-        default=None,
-        title="Titles and descriptions for each subsection of the research document.",
-    )
     citations: List[str] = Field(default_factory=list)
 
     @property
     def as_str(self) -> str:
-        subsections = "\n\n".join(
-            subsection.as_str for subsection in self.subsections or []
-        )
         citations = "\n".join([f" [{i}] {cit}" for i, cit in enumerate(self.citations)])
         return (
-            f"## {self.section_title}\n\n{self.content}\n\n{subsections}".strip()
+            f"## {self.section_title}\n\n{self.content}".strip()
             + f"\n\n{citations}".strip()
         )

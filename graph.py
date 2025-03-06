@@ -1,8 +1,12 @@
+from typing import List, TypedDict
 from dotenv import load_dotenv
 load_dotenv()
 
+from flask import g
 from langchain_core.tools import tool
-
+from langchain_core.documents import Document
+from langgraph.graph import StateGraph, END
+import operator
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 
@@ -10,71 +14,80 @@ from tools import tools
 from nodes import Nodes
 import structures
 from agent import Agent
+from chains import Chains
 
-node = Nodes()
-model_tool = tools()
+class graphSchema(TypedDict):
+    topic: str
+    output_format: str
+    related_topics: structures.Related_Topics
+    documents: List[Document]
+    document_outlines: str
+    document_outline: structures.Outline
+    perspectives: structures.Perspectives
+    perspective_content: List[List[str]]
+    final_content: List[structures.ContentSection]
 
-@tool
-def vector_search_tool(query: str) -> list:
-    """Vector Store Search tool to access documents from the vector store based on the given search query"""
-    return model_tool.vector_search_tool(query)
+class researchGraph:
 
-model = ChatGroq(model = "llama-3.3-70b-versatile")
-long_model = ChatOpenAI(model = "gpt-4o-mini")
+    __node: Nodes
+    __model_tools: tools
+    __chains: Chains
+    __model: ChatGroq
+    __long_model: ChatOpenAI
+    
+    def __init__(self):
+        self.__node = Nodes()
+        self.__model_tools = tools()
+        self.__chains = Chains(self.__model_tools)
+        self.__model = ChatGroq(model = "llama-3.3-70b-versatile", streaming = True)
+        self.__long_model = ChatOpenAI(model = "gpt-4o-mini", streaming = True)
+        __graph = StateGraph(graphSchema)
+        __graph.add_node("related_topics_generation", self.__related_topics_generation)
+        __graph.add_node("web_searching_and_scraping", self.__web_searching_and_scraping)
+        __graph.add_node("document_outline_generation", self.__document_outline_generation)
+        __graph.add_node("perspectives_generation", self.__perspectives_generation)
+        __graph.add_node("perspective_section_generation", self.__perspective_section_generation)
+        __graph.add_node("final_section_generation", self.__final_section_generation)
+        __graph.add_edge("related_topics_generation", "web_searching_and_scraping")
+        __graph.add_edge("web_searching_and_scraping", "document_outline_generation")
+        __graph.add_edge("document_outline_generation", "perspectives_generation")
+        __graph.add_edge("perspectives_generation", "perspective_section_generation")
+        __graph.add_edge("perspective_section_generation", "final_section_generation")
+        __graph.add_edge("final_section_generation", END)
+        __graph.set_entry_point("related_topics_generation")
+        self.graph = __graph.compile()
 
-topic = "Text Extraction and Recognition Algorithms"
+    def __related_topics_generation(self, state: graphSchema):
+        return {"related_topics" : self.__model.with_structured_output(schema=structures.Related_Topics).invoke(self.__node.get_related_topics(state["topic"]))}
+    
+    def __web_searching_and_scraping(self, state: graphSchema):
+        search_dict = {i : 1 for i in state["related_topics"].topics}
+        search_dict[state["topic"]] = 4
+        return {"documents" : self.__model_tools.web_search_tool(search_dict)}
+    
+    def __document_outline_generation(self, state: graphSchema):
+        __outlines = self.__chains.get_document_outline(state["documents"])
+        return {"document_outline" : self.__long_model.with_structured_output(schema=structures.Outline).invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines)), "document_outlines" : __outlines}
 
-output_format = "professional report"
+    def __perspectives_generation(self, state: graphSchema):
+        return {"perspectives" : self.__long_model.with_structured_output(schema=structures.Perspectives).invoke(self.__node.generate_perspectives(state["topic"], state["document_outlines"]))}
 
-print("Starting the process\n\n----------------------------------\n\n")
+    def __perspective_section_generation(self, state: graphSchema):
+        __perspective_section_content = []
+        for section in state["document_outline"].sections:
+            __perspective_section_content.append(self.__chains.generate_perspective_content(state["perspectives"], state["topic"], state["output_format"], state["document_outline"].as_str, section.as_str))
+        return {"perspective_content" : __perspective_section_content}
+    
+    def __final_section_generation(self, state: graphSchema):
+        __final_section_content = []
+        for i in range(len(state["document_outline"].sections)):
+            __content = self.__long_model.with_structured_output(schema=structures.ContentSection).invoke(self.__node.generate_combined_section(state["perspective_content"][i], state["topic"], state["document_outline"].as_str, state["document_outline"].sections[i].as_str))
+            __final_section_content.append(__content)
+            with open("output.md", "a", encoding="utf-8") as file:
+                file.write(__content.as_str + "\n\n")
+        print("\n\n", __final_section_content)
+        return {"final_content" : __final_section_content}
 
-related_topics = model.with_structured_output(structures.Related_Topics).invoke(node.get_related_topics(topic))
-
-print(related_topics.topics, "\n\n----------------------------------\n\nsearch start")
-
-search_dict = {i : 4 for i in related_topics.topics}
-search_dict[topic] = 10
-
-documents = model_tool.web_search_tool(search_dict)
-print("search done\n\n----------------------------------\n\n")
-
-outlines = ""
-for doc in documents:
-    outline = long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(node.get_outline(doc.page_content))
-    if outline:
-        outlines += outline.as_str + "\n\n"
-
-document_outline = long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(node.generate_outline(topic, output_format, outlines))
-
-print(document_outline.as_str, "\n\n----------------------------------\n\n")
-
-perspectives = long_model.with_structured_output(structures.Perspectives).invoke(node.generate_perspectives(topic, outlines))
-
-agents = []
-for editor in perspectives.editors:
-    agents.append({"Agent" : Agent([vector_search_tool]), "Persona" : editor.persona})
-    print(editor.persona, "\n")
-print("\n----------------------------------\n\n")
-
-perspective_section_content = []
-for section in document_outline.sections:
-    content = ""
-    for agent in agents:
-        result = agent["Agent"].graph.invoke({"messages" : node.perspective_agent(agent["Persona"], topic, output_format, document_outline.as_str, section.as_str)})
-        content += result["messages"][-1].content + "\n\n"
-        print(result["messages"][-1].content, "\n")
-
-    perspective_section_content.append(content)
-
-print("\n----------------------------------\n\n")
-
-final_section_content = []
-for i in range(len(document_outline.sections)):
-    content = long_model.with_structured_output(structures.ContentSection).invoke(node.generate_combined_section(perspective_section_content[i], topic, document_outline.as_str, document_outline.sections[i].as_str))
-    final_section_content.append(content.as_str)
-    print(content.as_str, "\n")
-
-print("\n----------------------------------\n\nEND!")
-
-model_tool.close_tools()
-del model_tool
+graph = researchGraph()
+result = graph.graph.invoke({"topic" : "Wearable Devices for IOT", "output_format" : "professional report"})
+print("\n\n--------------------------------\n\nResult:\n", result)
