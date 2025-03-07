@@ -2,18 +2,14 @@ from typing import List, TypedDict
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import g
-from langchain_core.tools import tool
 from langchain_core.documents import Document
 from langgraph.graph import StateGraph, END
-import operator
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 
 from tools import tools
 from nodes import Nodes
 import structures
-from agent import Agent
 from chains import Chains
 
 class graphSchema(TypedDict):
@@ -61,8 +57,8 @@ class researchGraph:
         return {"related_topics" : self.__model.with_structured_output(schema=structures.Related_Topics).invoke(self.__node.get_related_topics(state["topic"]))}
     
     def __web_searching_and_scraping(self, state: graphSchema):
-        search_dict = {i : 1 for i in state["related_topics"].topics}
-        search_dict[state["topic"]] = 4
+        search_dict = {i : 4 for i in state["related_topics"].topics}
+        search_dict[state["topic"]] = 10
         return {"documents" : self.__model_tools.web_search_tool(search_dict)}
     
     def __document_outline_generation(self, state: graphSchema):
@@ -85,9 +81,7 @@ class researchGraph:
             __final_section_content.append(__content)
             with open("output.md", "a", encoding="utf-8") as file:
                 file.write(__content.as_str + "\n\n")
-        print("\n\n", __final_section_content)
         return {"final_content" : __final_section_content}
 
 graph = researchGraph()
 result = graph.graph.invoke({"topic" : "Wearable Devices for IOT", "output_format" : "professional report"})
-print("\n\n--------------------------------\n\nResult:\n", result)
