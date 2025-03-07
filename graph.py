@@ -1,11 +1,15 @@
-from typing import List, TypedDict
 from dotenv import load_dotenv
 load_dotenv()
+
+from typing import List, TypedDict
+import time
 
 from langchain_core.documents import Document
 from langgraph.graph import StateGraph, END
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
+
+from openai import RateLimitError
 
 from tools import tools
 from nodes import Nodes
@@ -54,34 +58,72 @@ class researchGraph:
         self.graph = __graph.compile()
 
     def __related_topics_generation(self, state: graphSchema):
-        return {"related_topics" : self.__model.with_structured_output(schema=structures.Related_Topics).invoke(self.__node.get_related_topics(state["topic"]))}
+        try:
+            return {"related_topics" : self.__model.with_structured_output(schema=structures.Related_Topics).invoke(self.__node.get_related_topics(state["topic"]))}
+        except RateLimitError:
+            time.sleep(10)
+            return {"related_topics" : self.__model.with_structured_output(schema=structures.Related_Topics).invoke(self.__node.get_related_topics(state["topic"]))}
+        except Exception:
+            return {"related_topics" : self.__model.with_structured_output(schema=structures.Related_Topics).invoke(self.__node.get_related_topics(state["topic"]))}
     
     def __web_searching_and_scraping(self, state: graphSchema):
-        search_dict = {i : 4 for i in state["related_topics"].topics}
+        search_dict = {i : 5 for i in state["related_topics"].topics}
         search_dict[state["topic"]] = 10
-        return {"documents" : self.__model_tools.web_search_tool(search_dict)}
+        try:
+            return {"documents" : self.__model_tools.web_search_tool(search_dict)}
+        except RateLimitError:
+            time.sleep(10)
+            return {"documents" : self.__model_tools.web_search_tool(search_dict)}
+        except Exception:
+            return {"documents" : self.__model_tools.web_search_tool(search_dict)}
     
     def __document_outline_generation(self, state: graphSchema):
         __outlines = self.__chains.get_document_outline(state["documents"])
-        return {"document_outline" : self.__long_model.with_structured_output(schema=structures.Outline).invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines)), "document_outlines" : __outlines}
+        try:
+            return {"document_outline" : self.__long_model.with_structured_output(schema=structures.Outline).invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines)), "document_outlines" : __outlines}
+        except RateLimitError:
+            time.sleep(10)
+            return {"document_outline" : self.__long_model.with_structured_output(schema=structures.Outline).invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines)), "document_outlines" : __outlines}
+        except Exception:
+            return {"document_outline" : self.__long_model.with_structured_output(schema=structures.Outline).invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines)), "document_outlines" : __outlines}
 
     def __perspectives_generation(self, state: graphSchema):
-        return {"perspectives" : self.__long_model.with_structured_output(schema=structures.Perspectives).invoke(self.__node.generate_perspectives(state["topic"], state["document_outlines"]))}
+        try:
+            return {"perspectives" : self.__long_model.with_structured_output(schema=structures.Perspectives).invoke(self.__node.generate_perspectives(state["topic"], state["document_outlines"]))}
+        except RateLimitError:
+            time.sleep(10)
+            return {"perspectives" : self.__long_model.with_structured_output(schema=structures.Perspectives).invoke(self.__node.generate_perspectives(state["topic"], state["document_outlines"]))}            
+        except Exception:
+            return {"perspectives" : self.__long_model.with_structured_output(schema=structures.Perspectives).invoke(self.__node.generate_perspectives(state["topic"], state["document_outlines"]))}
 
     def __perspective_section_generation(self, state: graphSchema):
         __perspective_section_content = []
         for section in state["document_outline"].sections:
-            __perspective_section_content.append(self.__chains.generate_perspective_content(state["perspectives"], state["topic"], state["output_format"], state["document_outline"].as_str, section.as_str))
+            try:
+                __perspective_section_content.append(self.__chains.generate_perspective_content(state["perspectives"], state["topic"], state["output_format"], state["document_outline"].as_str, section.as_str))
+            except RateLimitError:
+                time.sleep(10)
+                __perspective_section_content.append(self.__chains.generate_perspective_content(state["perspectives"], state["topic"], state["output_format"], state["document_outline"].as_str, section.as_str))
+            except Exception:
+                __perspective_section_content.append(self.__chains.generate_perspective_content(state["perspectives"], state["topic"], state["output_format"], state["document_outline"].as_str, section.as_str))
+
         return {"perspective_content" : __perspective_section_content}
     
     def __final_section_generation(self, state: graphSchema):
         __final_section_content = []
         for i in range(len(state["document_outline"].sections)):
-            __content = self.__long_model.with_structured_output(schema=structures.ContentSection).invoke(self.__node.generate_combined_section(state["perspective_content"][i], state["topic"], state["document_outline"].as_str, state["document_outline"].sections[i].as_str))
+            try:
+                __content = self.__long_model.with_structured_output(schema=structures.ContentSection).invoke(self.__node.generate_combined_section(state["perspective_content"][i], state["topic"], state["document_outline"].as_str, state["document_outline"].sections[i].as_str))
+            except RateLimitError:
+                time.sleep(10)
+                __content = self.__long_model.with_structured_output(schema=structures.ContentSection).invoke(self.__node.generate_combined_section(state["perspective_content"][i], state["topic"], state["document_outline"].as_str, state["document_outline"].sections[i].as_str))
+            except Exception:
+                __content = self.__long_model.with_structured_output(schema=structures.ContentSection).invoke(self.__node.generate_combined_section(state["perspective_content"][i], state["topic"], state["document_outline"].as_str, state["document_outline"].sections[i].as_str))
+
             __final_section_content.append(__content)
-            with open("output.md", "a", encoding="utf-8") as file:
+            with open("partho_proposal.md", "a", encoding="utf-8") as file:
                 file.write(__content.as_str + "\n\n")
         return {"final_content" : __final_section_content}
 
 graph = researchGraph()
-result = graph.graph.invoke({"topic" : "Wearable Devices for IOT", "output_format" : "professional report"})
+result = graph.graph.invoke({"topic" : "Biomanufacturing of Biofuels and Bioplastic: Innovation to Sustainable Future", "output_format" : "Research Proposal"})

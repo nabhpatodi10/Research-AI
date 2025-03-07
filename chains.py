@@ -1,7 +1,10 @@
+import time
+
 from langchain.schema.runnable import RunnableParallel, RunnableLambda
 from langchain_core.tools import tool
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
+from openai import RateLimitError
 
 from nodes import Nodes
 from tools import tools
@@ -26,7 +29,12 @@ class Chains:
 
         __final_chain = RunnableParallel({f"chain{i}" : chain for i, chain in enumerate(__chains)})
 
-        __outlines = __final_chain.invoke({f"chain{i}" : doc for i, doc in enumerate(documents)})
+        try:
+            __outlines = __final_chain.invoke({f"chain{i}" : doc for i, doc in enumerate(documents)})
+        except RateLimitError:
+            time.sleep(10)
+            __outlines = __final_chain.invoke({f"chain{i}" : doc for i, doc in enumerate(documents[:len(documents)//2])})
+            __outlines.update(__final_chain.invoke({f"chain{i+len(documents)//2}" : doc for i, doc in enumerate(documents[len(documents)//2:])}))
 
         __stroutlines = ""
         for i in __outlines:
@@ -50,7 +58,13 @@ class Chains:
             __chains.append(RunnableLambda(lambda _, i=i : self.__node.perspective_agent(perspectives.editors[i].persona, topic, output_format, outline, section)) | __return_dict | __agent.graph)
 
         __final_chain = RunnableParallel({f"chain{i}" : chain for i, chain in enumerate(__chains)})
-        __results = __final_chain.invoke({})
+
+        try:
+            __results = __final_chain.invoke({})
+        except RateLimitError:
+            time.sleep(10)
+            __results = __final_chain.invoke({})
+            
         __final_result = []
         for i in __results:
             __final_result.append(__results[i]["messages"][-1].content)

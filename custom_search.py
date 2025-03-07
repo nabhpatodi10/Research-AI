@@ -19,7 +19,7 @@ class CustomSearch:
                 num=num,
                 q=query,
                 c2coff=1,
-                orTerms="Research Paper|Article|Research Article|Research",
+                orTerms="Research Paper|Article|Research Article|Research|Latest|News",
                 hl="en"
             ).execute()
             items = search["items"]

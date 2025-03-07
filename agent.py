@@ -1,3 +1,4 @@
+import time
 from typing import TypedDict, Annotated, List
 import operator
 from langchain_core.messages import AnyMessage, ToolMessage
@@ -5,6 +6,7 @@ from langgraph.graph import StateGraph, END
 from langchain_core.documents import Document
 
 from langchain_openai import ChatOpenAI
+from openai import RateLimitError
 
 class AgentState(TypedDict):
     messages: Annotated[List[AnyMessage], operator.add]
@@ -28,9 +30,13 @@ class Agent:
         self.__model = model.bind_tools(tools)
 
     def __call_llm(self, state: AgentState):
-        messages = state["messages"]
-        message = self.__model.invoke(messages)
-        return {"messages" : [message]}
+        try:
+            messages = state["messages"]
+            message = self.__model.invoke(messages)
+            return {"messages" : [message]}
+        except RateLimitError:
+            time.sleep(10)
+            self.__call_llm(state)
     
     def __take_action(self, state: AgentState):
         tool_calls = state["messages"][-1].tool_calls
