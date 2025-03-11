@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()
 import os
 from pymongo import MongoClient
 from langchain_mongodb import MongoDBAtlasVectorSearch, MongoDBChatMessageHistory
@@ -13,12 +15,13 @@ class database:
     __splitter: RecursiveCharacterTextSplitter
     __vectorSearch: MongoDBAtlasVectorSearch
 
-    def __init__(self):
+    def __init__(self, session_id: str):
         self.__client = MongoClient(os.getenv("MONGODB_URI"))
-        self.__collection = self.__client["LangChain"]["vectors"]
+        self.__vector_collection = self.__client["LangChain"]["vectors"]
+        self.__chat_history = MongoDBChatMessageHistory(connection_string=os.getenv("MONGODB_URI"), database_name="LangChain", collection_name="chats", session_id=session_id)
         self.__embeddingModel = GoogleGenerativeAIEmbeddings(model = "models/text-embedding-004", google_api_key = os.getenv("GEMINI_API_KEY"))
         self.__splitter = RecursiveCharacterTextSplitter(chunk_size = 600, chunk_overlap = 100)
-        self.__vectorSearch = MongoDBAtlasVectorSearch(collection = self.__collection, embedding = self.__embeddingModel)
+        self.__vectorSearch = MongoDBAtlasVectorSearch(collection = self.__vector_collection, embedding = self.__embeddingModel)
         self.__retriever = self.__vectorSearch.as_retriever(search_type = "mmr", search_kwargs = {"k" : 10})
 
     def add_data(self, documents: list[Document]) -> None:
@@ -35,5 +38,37 @@ class database:
         except Exception as error:
             raise error
         
+    def add_human_message(self, message: str) -> None:
+        try:
+            self.__chat_history.add_user_message(message)
+        except Exception as error:
+            raise error
+        
+    def add_ai_message(self, message: str) -> None:
+        try:
+            self.__chat_history.add_ai_message(message)
+        except Exception as error:
+            raise error
+        
+    def add_message(self, message) -> None:
+        try:
+            self.__chat_history.add_message(message)
+        except Exception as error:
+            raise error
+        
+    def get_messages(self) -> list:
+        try:
+            return self.__chat_history.messages
+        except Exception as error:
+            raise error
+        
+    def clear_chat(self) -> None:
+        try:
+            self.__chat_history.clear()
+        except Exception as error:
+            raise error
+        
     def close_connection(self) -> None:
         self.__client.close()
+        del self.__chat_history
+        del self.__client

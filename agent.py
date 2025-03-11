@@ -11,7 +11,7 @@ from openai import RateLimitError
 class AgentState(TypedDict):
     messages: Annotated[List[AnyMessage], operator.add]
 
-class Agent:
+class ExpertAgent:
 
     def __init__(self, tools: list, model: ChatOpenAI = ChatOpenAI(model = "gpt-4o-mini")):
 

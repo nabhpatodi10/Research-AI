@@ -47,6 +47,10 @@ class Related_Topics(BaseModel):
         max_length=10
     )
 
+    @property
+    def as_str(self) -> str:
+        return ", ".join(self.topics).strip()
+
 class Editor(BaseModel):
     affiliation: str = Field(
         description="Primary affiliation of the editor.",
@@ -70,7 +74,7 @@ class Perspectives(BaseModel):
     editors: List[Editor] = Field(
         description="Comprehensive list of editors with their roles and affiliations.",
         min_length=2,
-        max_length=6
+        max_length=10
     )
 
 class ContentSection(BaseModel):

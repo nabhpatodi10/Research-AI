@@ -37,7 +37,8 @@ class Nodes:
             SystemMessage(
                 content=f"""You are an expert research document writer. Your job is to write the detailed outline of a research document for the provided topic and provided \
                 type of research document. The outline should consist of all the important major sections and subsections of the research document with their descriptions and \
-                basic information about the content under each of them. Be very comprehensive and specific.
+                basic information about the content under each of them. Do not add conclusion and references as subsections at the end of each section. They should be separate \
+                sections at the end of the document. Be very comprehensive and specific.
                 
                 You can also refer to the provided outlines for some documents related to the topic for inspiration."""
             ),
