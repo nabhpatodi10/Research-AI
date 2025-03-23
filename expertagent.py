@@ -1,21 +1,18 @@
 import time
-from typing import TypedDict, Annotated, List
-import operator
-from langchain_core.messages import AnyMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 from langgraph.graph import StateGraph, END
 from langchain_core.documents import Document
 
 from langchain_openai import ChatOpenAI
 from openai import RateLimitError
 
-class AgentState(TypedDict):
-    messages: Annotated[List[AnyMessage], operator.add]
+import structures
 
 class ExpertAgent:
 
     def __init__(self, tools: list, model: ChatOpenAI = ChatOpenAI(model = "gpt-4o-mini")):
 
-        __graph = StateGraph(AgentState)
+        __graph = StateGraph(structures.AgentState)
         __graph.add_node("llm", self.__call_llm)
         __graph.add_node("action", self.__take_action)
         __graph.add_conditional_edges(
@@ -29,7 +26,7 @@ class ExpertAgent:
         self.__tools = {t.name: t for t in tools}
         self.__model = model.bind_tools(tools)
 
-    def __call_llm(self, state: AgentState):
+    def __call_llm(self, state: structures.AgentState):
         try:
             messages = state["messages"]
             message = self.__model.invoke(messages)
@@ -38,7 +35,7 @@ class ExpertAgent:
             time.sleep(10)
             self.__call_llm(state)
     
-    def __take_action(self, state: AgentState):
+    def __take_action(self, state: structures.AgentState):
         tool_calls = state["messages"][-1].tool_calls
         results = []
         for t in tool_calls:
@@ -62,5 +59,5 @@ class ExpertAgent:
         print("Back to the model!")
         return {"messages" : results}
     
-    def __check_action(self, state: AgentState):
+    def __check_action(self, state: structures.AgentState):
         return len(state["messages"][-1].tool_calls) > 0

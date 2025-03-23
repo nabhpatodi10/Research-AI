@@ -1,8 +1,8 @@
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AnyMessage
 
 class Nodes:
     
-    def get_related_topics(self, topic: str):
+    def get_related_topics(self, topic: str) -> list[AnyMessage]:
         messages = [
             SystemMessage(
                 content="""You are a professional researcher. Your job is to find the related topics for the provided topic. You need to find the topics that are closely \
@@ -16,7 +16,7 @@ class Nodes:
 
         return messages
     
-    def get_outline(self, document: str):
+    def get_outline(self, document: str) -> list[AnyMessage]:
         messages = [
             SystemMessage(
                 content="""You are a professional researcher. Your job is to analyze the provided research document and extract the outline of the document. You need to \
@@ -32,7 +32,7 @@ class Nodes:
 
         return messages
     
-    def generate_outline(self, topic: str, output_format: str, outlines: str):
+    def generate_outline(self, topic: str, output_format: str, outlines: str) -> list[AnyMessage]:
         messages = [
             SystemMessage(
                 content=f"""You are an expert research document writer. Your job is to write the detailed outline of a research document for the provided topic and provided \
@@ -52,7 +52,7 @@ class Nodes:
 
         return messages
     
-    def generate_perspectives(self, topic: str, outlines: str):
+    def generate_perspectives(self, topic: str, outlines: str) -> list[AnyMessage]:
         messages = [
             SystemMessage(
                 content=f"""You are a professional researcher. Your job is to generate the perspectives for the provided topic. You need to select diverse and distinct group \
@@ -69,7 +69,7 @@ class Nodes:
 
         return messages
     
-    def perspective_agent(self, perspective: str, topic: str, output_format: str, outline: str, section: str):
+    def perspective_agent(self, perspective: str, topic: str, output_format: str, outline: str, section: str) -> list[AnyMessage]:
         messages = [
             SystemMessage(
                 content=f"""You are {perspective}
@@ -97,7 +97,7 @@ class Nodes:
 
         return messages
     
-    def generate_combined_section(self, section_content: str, topic: str, outline: str, section: str):
+    def generate_combined_section(self, section_content: str, topic: str, outline: str, section: str) -> list[AnyMessage]:
         messages = [
             SystemMessage(
                 content=f"""You are a professional researcher and writer who is helping with the research document on the topic {topic} with the following outline:
@@ -113,6 +113,41 @@ class Nodes:
                 
                 These are the provided content by different professionals:
                 {section_content}"""
+            )
+        ]
+
+        return messages
+    
+    def chat_agent(self, user_input: str) -> list[AnyMessage]:
+        messages = [
+            SystemMessage(
+                content="""You are a professional researcher and writer who is helping with the research document. You have access to the following tools:
+                
+                vector_search_tool - This tool would help you retrieve the relevant documents from the vector store based on the search query which would be in string format \
+                and would consist keywords or phrases, but do not use AND, OR, NOT operators, instead, call this tool multiple times at once with different keywords or phrases and \
+                calling this tool before going for web_search_tool is recommended
+                
+                web_search_tool - This tool would help you retrieve the relevant documents from the web based on the search query which would be in string format and would \
+                consist keywords or phrases, but do not use AND, OR, NOT operators, instead, call this tool multiple times at once with different keywords or phrases and \
+                calling this tool after vector_search_tool if no relevant documents are found in the vector store is recommended
+                
+                You can call these tools either sequentially or together as well.
+                
+                Mostly, you will get only two types of tasks:
+                
+                1. Questions related to the topic of research or the research document will be asked to you, in that case, you need to answer the questions based on the \
+                information you have or you can use the tools to fetch the relevant information and then answer the questions. The answer you give must be comprehensive and \
+                detailed.
+                
+                2. You will be asked to rewrite or modify the content of a section of the research document or add a new section to the research document. In that case, you need \
+                to analyse the content of research document and all relevant sections and the outline of the research document, then perform a deep and thorough research on the \
+                research topic, other relevant topics and the relevant sections of the research document using the tools and fetch the relevant information and only then write the \
+                content for the section in a detailed and comprehensive manner. Do not forget to cite your sources.
+                
+                If the task is something other than these two, you have to act accordingly to give the best possible response to the user."""
+            ),
+            HumanMessage(
+                content=user_input 
             )
         ]
 

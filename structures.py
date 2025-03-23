@@ -1,9 +1,11 @@
-from typing import List, Optional
+from typing import List, Optional, TypedDict, Annotated
 from pydantic import BaseModel, Field
+import operator
+from langchain_core.messages import AnyMessage
 
 class OutlineSubsection(BaseModel):
-    subsection_title: str = Field(..., title="Title of the subsection")
-    description: str = Field(..., title="Content of the subsection")
+    subsection_title: str = Field(title="Title of the subsection")
+    description: str = Field(title="Content of the subsection")
 
     @property
     def as_str(self) -> str:
@@ -11,8 +13,8 @@ class OutlineSubsection(BaseModel):
 
 
 class OutlineSection(BaseModel):
-    section_title: str = Field(..., title="Title of the section")
-    description: str = Field(..., title="Content of the section")
+    section_title: str = Field(title="Title of the section")
+    description: str = Field(title="Content of the section")
     subsections: Optional[List[OutlineSubsection]] = Field(
         default=None,
         title="Titles and descriptions for each subsection of the Research page.",
@@ -28,7 +30,7 @@ class OutlineSection(BaseModel):
 
 
 class Outline(BaseModel):
-    page_title: str = Field(..., title="Title of the Research page")
+    page_title: str = Field(title="Title of the Research page")
     sections: List[OutlineSection] = Field(
         default_factory=list,
         title="Titles and descriptions for each section of the Research page.",
@@ -78,9 +80,9 @@ class Perspectives(BaseModel):
     )
 
 class ContentSection(BaseModel):
-    section_title: str = Field(..., title="Title of the section")
-    content: str = Field(..., title="Full content of the section")
-    citations: List[str] = Field(default_factory=list)
+    section_title: str = Field(title="Title of the section")
+    content: str = Field(title="Full content of the section")
+    citations: List[str] = Field(default_factory=list, description="List of citations for the content")
 
     @property
     def as_str(self) -> str:
@@ -89,3 +91,18 @@ class ContentSection(BaseModel):
             f"## {self.section_title}\n\n{self.content}".strip()
             + f"\n\n{citations}".strip()
         )
+
+class CompleteDocument(BaseModel):
+    title: str = Field(title="Title of the document")
+    sections: List[ContentSection] = Field(
+        default_factory=list,
+        title="Sections of the document",
+    )
+
+    @property
+    def as_str(self) -> str:
+        sections = "\n\n".join(section.as_str for section in self.sections)
+        return f"# {self.title}\n\n{sections}".strip()
+    
+class AgentState(TypedDict):
+    messages: Annotated[List[AnyMessage], operator.add]

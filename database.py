@@ -7,6 +7,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from uuid import uuid4
 from langchain_core.documents import Document
+from langchain_core.messages import AIMessage, HumanMessage
 
 class database:
 
@@ -38,13 +39,13 @@ class database:
         except Exception as error:
             raise error
         
-    def add_human_message(self, message: str) -> None:
+    def add_human_message(self, message: str | HumanMessage) -> None:
         try:
             self.__chat_history.add_user_message(message)
         except Exception as error:
             raise error
         
-    def add_ai_message(self, message: str) -> None:
+    def add_ai_message(self, message: str | AIMessage) -> None:
         try:
             self.__chat_history.add_ai_message(message)
         except Exception as error:

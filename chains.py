@@ -10,7 +10,7 @@ from nodes import Nodes
 from tools import tools
 from custom_search import CustomSearch
 from scrape import Scrape
-from agent import ExpertAgent
+from expertagent import ExpertAgent
 import structures
 
 class Chains:
@@ -67,22 +67,20 @@ class Chains:
             raise error
 
     def get_document_outline(self, documents: list[Document]) -> str:
-        __chains = []
-        for i in range(len(documents)):
-            __chains.append(RunnableLambda(lambda input, i=i: self.__node.get_outline(input[f"chain{i}"])) | self.__model.with_structured_output(schema=structures.Outline, method="json_schema"))
-
-        __final_chain = RunnableParallel({f"chain{i}" : chain for i, chain in enumerate(__chains)})
-
+        batch = []
+        for document in documents:
+            batch.append(self.__node.get_outline(document))
+        
         try:
-            __outlines = __final_chain.invoke({f"chain{i}" : doc for i, doc in enumerate(documents)})
+            __outlines = self.__model.with_structured_output(schema=structures.Outline, method="json_schema").batch(batch)
         except RateLimitError:
             time.sleep(10)
-            __outlines = __final_chain.invoke({f"chain{i}" : doc for i, doc in enumerate(documents[:len(documents)//2])})
-            __outlines.update(__final_chain.invoke({f"chain{i+len(documents)//2}" : doc for i, doc in enumerate(documents[len(documents)//2:])}))
+            __outlines = self.__model.with_structured_output(schema=structures.Outline, method="json_schema").batch(batch[len(batch)//2:])
+            __outlines += self.__model.with_structured_output(schema=structures.Outline, method="json_schema").batch(batch[:len(batch)//2])
 
         __stroutlines = ""
         for i in __outlines:
-            __stroutlines += __outlines[i].as_str + "\n\n--------------------------------\n\n"
+            __stroutlines += i.as_str + "\n\n--------------------------------\n\n"
 
         return __stroutlines
     
