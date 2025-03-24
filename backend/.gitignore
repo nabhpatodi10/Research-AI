@@ -1,8 +1,11 @@
 .env
 __pycache__
-sample.txt
 credentials.json
 token.json
-static/firebaseConfig.txt
+static/
 Images/Graph.excalidraw
 *.md
+Lib
+Scripts
+Include
+pyvenv.cfg

@@ -34,7 +34,7 @@ class Tools:
     
     def web_search_tool(self, query: str) -> list[Document]:
         """Web Search tool to access documents from the web based on the given search query"""
-        __urls =  self.__chains.web_search({query: 5})
+        __urls =  self.__chains.web_search({query: 10})
         return self.__chains.web_scrape(__urls)
     
     def return_tools(self) -> list[BaseTool]:

@@ -27,9 +27,9 @@ class graphSchema(TypedDict):
     document_outline: structures.Outline
     perspectives: structures.Perspectives
     perspective_content: List[List[str]]
-    final_content: List[structures.ContentSection]
+    final_content: structures.CompleteDocument
 
-class researchGraph:
+class ResearchGraph:
 
     __node: Nodes
     __model_tools: tools
@@ -145,22 +145,6 @@ class researchGraph:
         return {"perspective_content" : __perspective_section_content}
     
     def __final_section_generation(self, state: graphSchema):
-        # with open("output.md", "a", encoding="utf-8") as file:
-        #     file.write("# " + state["document_outline"].page_title + "\n\n")
-        # __final_section_content = []
-        # for i in range(len(state["document_outline"].sections)):
-        #     try:
-        #         __content = self.__long_model.with_structured_output(schema=structures.ContentSection).invoke(self.__node.generate_combined_section(state["perspective_content"][i], state["topic"], state["document_outline"].as_str, state["document_outline"].sections[i].as_str))
-        #     except RateLimitError:
-        #         time.sleep(10)
-        #         __content = self.__long_model.with_structured_output(schema=structures.ContentSection).invoke(self.__node.generate_combined_section(state["perspective_content"][i], state["topic"], state["document_outline"].as_str, state["document_outline"].sections[i].as_str))
-        #     except Exception:
-        #         __content = self.__long_model.with_structured_output(schema=structures.ContentSection).invoke(self.__node.generate_combined_section(state["perspective_content"][i], state["topic"], state["document_outline"].as_str, state["document_outline"].sections[i].as_str))
-
-        #     __final_section_content.append(__content)
-        #     with open("output.md", "a", encoding="utf-8") as file:
-        #         file.write(__content.as_str + "\n\n")
-
         batch = []
         for i in range(len(state["document_outline"].sections)):
             batch.append(self.__node.generate_combined_section(state["perspective_content"][i], state["topic"], state["document_outline"].as_str, state["document_outline"].sections[i].as_str))
@@ -185,5 +169,5 @@ class researchGraph:
 
         return {"final_content" : __final_section_content}
 
-graph = researchGraph("004")
-result = graph.graph.invoke({"topic" : "Crew AI vs LangChain vs LangGraph", "output_format" : "Analytical Comparitive Report"})
+# graph = ResearchGraph("005")
+# result = graph.graph.invoke({"topic" : "Apple vs Samsung", "output_format" : "Analytical Comparitive Report"})
