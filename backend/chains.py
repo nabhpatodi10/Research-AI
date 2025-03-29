@@ -1,13 +1,14 @@
 import time
 
 from langchain.schema.runnable import RunnableParallel, RunnableLambda
-from langchain_core.tools import tool
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 from openai import RateLimitError
+from playwright.async_api import Browser
+import asyncio
 
 from nodes import Nodes
-from tools import tools
+from database import Database
 from custom_search import CustomSearch
 from scrape import Scrape
 from expertagent import ExpertAgent
@@ -17,16 +18,16 @@ class Chains:
 
     __model: ChatOpenAI
     __node: Nodes
-    __tool: tools
+    __database: Database
     __customSearch: CustomSearch
     __scrape: Scrape
 
-    def __init__(self, tools: tools):
+    def __init__(self, database: Database, browser: Browser):
         self.__model = ChatOpenAI(model = "gpt-4o-mini")
         self.__node = Nodes()
         self.__customSearch = CustomSearch()
-        self.__scrape = Scrape()
-        self.__tool = tools
+        self.__scrape = Scrape(browser)
+        self.__database = database
 
     def web_search(self, queries: dict[str, int]) -> dict[str, str]:
         __chains = []
@@ -47,22 +48,32 @@ class Chains:
         except Exception as error:
             raise error
         
-    def web_scrape(self, urls: dict[str, str]) -> list[Document]:
-        __chains = []
-        for i in range(len(urls)):
-            __chains.append(RunnableLambda(lambda input, i=i: self.__scrape.scrape(input[f"chain{i}"][0], input[f"chain{i}"][1])))
+    async def web_scrape(self, urls: dict[str, str]) -> list[Document]:
+        # __chains = []
+        # for i in range(len(urls)):
+        #     __chains.append(RunnableLambda(lambda input, i=i: self.__scrape.scrape(input[f"chain{i}"][0], input[f"chain{i}"][1])))
         
-        __final_chain = RunnableParallel({f"chain{i}" : chain for i, chain in enumerate(__chains)})
+        # __final_chain = RunnableParallel({f"chain{i}" : chain for i, chain in enumerate(__chains)})
+
+        # try:
+        #     __documents = __final_chain.invoke({f"chain{i}" : (url, title) for i, (url, title) in enumerate(urls.items())})
+        #     __finaldocs = []
+        #     for i in __documents:
+        #         if __documents[i]:
+        #             __finaldocs.append(__documents[i])
+        #     print(f"\n\nTotal Documents: {len(__finaldocs)}\n\n")
+        #     return __finaldocs
+        
+        # except Exception as error:
+        #     raise error
 
         try:
-            __documents = __final_chain.invoke({f"chain{i}" : (url, title) for i, (url, title) in enumerate(urls.items())})
-            __finaldocs = []
-            for i in __documents:
-                if __documents[i]:
-                    __finaldocs.append(__documents[i])
-            print(f"\n\nTotal Documents: {len(__finaldocs)}\n\n")
-            return __finaldocs
-        
+            scrape_tasks = [self.__scrape.scrape(url, title) for url, title in urls.items()]
+            documents = await asyncio.gather(*scrape_tasks)
+
+            finaldocs = [doc for doc in documents if doc is not None]
+            print(f"\n\nTotal Documents: {len(finaldocs)}\n\n")
+            return finaldocs
         except Exception as error:
             raise error
 
@@ -86,17 +97,12 @@ class Chains:
     
     def generate_perspective_content(self, perspectives: structures.Perspectives, topic: str, output_format: str, outline: str, section: str) -> list[str]:
         __chains = []
-
-        @tool
-        def __vector_search_tool(query: str) -> list[Document]:
-            """Vector Store Search tool to access documents from the vector store based on the given search query"""
-            return self.__tool.vector_search_tool(query)
         
         def __return_dict(messages) -> dict:
             return {"messages" : messages}
 
         for i in range(len(perspectives.editors)):
-            __agent = ExpertAgent([__vector_search_tool])
+            __agent = ExpertAgent(self.__database.return_tool())
             __chains.append(RunnableLambda(lambda _, i=i : self.__node.perspective_agent(perspectives.editors[i].persona, topic, output_format, outline, section)) | __return_dict | __agent.graph)
 
         __final_chain = RunnableParallel({f"chain{i}" : chain for i, chain in enumerate(__chains)})

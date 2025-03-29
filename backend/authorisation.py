@@ -15,6 +15,8 @@ class authorisation():
                 creds.refresh(Request())
             elif creds and (creds.expired or not creds.valid):
                 os.remove("token.json")
+                flow = InstalledAppFlow.from_client_secrets_file("credentials.json", self.__SCOPES)
+                creds = flow.run_local_server()
             else:
                 flow = InstalledAppFlow.from_client_secrets_file("credentials.json", self.__SCOPES)
                 creds = flow.run_local_server()

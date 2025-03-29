@@ -7,9 +7,10 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from uuid import uuid4
 from langchain_core.documents import Document
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, AnyMessage
+from langchain_core.tools import tool, BaseTool
 
-class database:
+class Database:
 
     __client: MongoClient
     __embeddingModel: GoogleGenerativeAIEmbeddings
@@ -33,7 +34,8 @@ class database:
         except Exception as error:
             raise error
 
-    def search_data(self, query: str) -> list[Document]:
+    def vector_search_tool(self, query: str) -> list[Document]:
+        """Vector Store Search tool to access documents from the vector store based on the given search query"""
         try:
             return self.__retriever.invoke(query)
         except Exception as error:
@@ -57,7 +59,7 @@ class database:
         except Exception as error:
             raise error
         
-    def get_messages(self) -> list:
+    def get_messages(self) -> list[AnyMessage]:
         try:
             return self.__chat_history.messages
         except Exception as error:
@@ -68,6 +70,9 @@ class database:
             self.__chat_history.clear()
         except Exception as error:
             raise error
+        
+    def return_tool(self) -> list[BaseTool]:
+        return [tool(self.vector_search_tool)]
         
     def close_connection(self) -> None:
         self.__client.close()

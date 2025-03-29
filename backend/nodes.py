@@ -118,7 +118,7 @@ class Nodes:
 
         return messages
     
-    def chat_agent(self, user_input: str) -> list[AnyMessage]:
+    def chat_agent(self) -> list[SystemMessage]:
         messages = [
             SystemMessage(
                 content="""You are a professional researcher and writer who is helping with the research document. You have access to the following tools:
@@ -145,9 +145,6 @@ class Nodes:
                 content for the section in a detailed and comprehensive manner. Do not forget to cite your sources.
                 
                 If the task is something other than these two, you have to act accordingly to give the best possible response to the user."""
-            ),
-            HumanMessage(
-                content=user_input 
             )
         ]
 

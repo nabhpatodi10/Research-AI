@@ -9,10 +9,10 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import StateGraph, END
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
-
 from openai import RateLimitError
+from playwright.async_api import Browser
 
-from tools import tools
+from database import Database
 from nodes import Nodes
 import structures
 from chains import Chains
@@ -32,15 +32,15 @@ class graphSchema(TypedDict):
 class ResearchGraph:
 
     __node: Nodes
-    __model_tools: tools
+    __model_tools: Database
     __chains: Chains
     __model: ChatGroq
     __long_model: ChatOpenAI
     
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, browser: Browser):
         self.__node = Nodes()
-        self.__model_tools = tools(session_id)
-        self.__chains = Chains(self.__model_tools)
+        self.__model_tools = Database(session_id)
+        self.__chains = Chains(self.__model_tools, browser)
         self.__model = ChatGroq(model = "llama-3.3-70b-versatile")
         self.__long_model = ChatOpenAI(model = "gpt-4o-mini")
         __graph = StateGraph(graphSchema)
@@ -87,9 +87,9 @@ class ResearchGraph:
         except Exception as error:
             raise error
         
-    def __web_scraping(self, state: graphSchema):
+    async def __web_scraping(self, state: graphSchema):
         try:
-            __documents = self.__chains.web_scrape(state["urls"])
+            __documents = await self.__chains.web_scrape(state["urls"])
             return {"documents" : __documents}
         except Exception as error:
             raise error
@@ -97,31 +97,31 @@ class ResearchGraph:
     def __document_outline_generation(self, state: graphSchema):
         __outlines = self.__chains.get_document_outline(state["documents"])
         try:
-            document_outline = self.__long_model.with_structured_output(schema=structures.Outline).invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines))
+            document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines))
             self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
             return {"document_outline" : document_outline, "document_outlines" : __outlines}
         except RateLimitError:
             time.sleep(10)
-            document_outline = self.__long_model.with_structured_output(schema=structures.Outline).invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines))
+            document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines))
             self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
             return {"document_outline" : document_outline, "document_outlines" : __outlines}
         except Exception:
-            document_outline = self.__long_model.with_structured_output(schema=structures.Outline).invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines))
+            document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines))
             self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
             return {"document_outline" : document_outline, "document_outlines" : __outlines}
 
     def __perspectives_generation(self, state: graphSchema):
         try:
-            perspectives = self.__long_model.with_structured_output(schema=structures.Perspectives).invoke(self.__node.generate_perspectives(state["topic"], state["document_outlines"]))
+            perspectives = self.__long_model.with_structured_output(schema=structures.Perspectives, method="json_schema").invoke(self.__node.generate_perspectives(state["topic"], state["document_outlines"]))
             self.__model_tools.add_ai_message(AIMessage(content=["Perspectives"] + [editor.persona for editor in perspectives.editors]))
             return {"perspectives" : perspectives}
         except RateLimitError:
             time.sleep(10)
-            perspectives = self.__long_model.with_structured_output(schema=structures.Perspectives).invoke(self.__node.generate_perspectives(state["topic"], state["document_outlines"]))
+            perspectives = self.__long_model.with_structured_output(schema=structures.Perspectives, method="json_schema").invoke(self.__node.generate_perspectives(state["topic"], state["document_outlines"]))
             self.__model_tools.add_ai_message(AIMessage(content=["Perspectives"] + [editor.persona for editor in perspectives.editors]))
             return {"perspectives" : perspectives}            
         except Exception:
-            perspectives = self.__long_model.with_structured_output(schema=structures.Perspectives).invoke(self.__node.generate_perspectives(state["topic"], state["document_outlines"]))
+            perspectives = self.__long_model.with_structured_output(schema=structures.Perspectives, method="json_schema").invoke(self.__node.generate_perspectives(state["topic"], state["document_outlines"]))
             self.__model_tools.add_ai_message(AIMessage(content=["Perspectives"] + [editor.persona for editor in perspectives.editors]))
             return {"perspectives" : perspectives}
 
@@ -165,9 +165,9 @@ class ResearchGraph:
         self.__model_tools.add_ai_message(AIMessage(content = ["Final Document", __final_document.as_str]))
         with open("output.md", "a", encoding="utf-8") as file:
             file.write(__final_document.as_str)
-        self.__model_tools.close_tools()
+        self.__model_tools.close_connection()
 
         return {"final_content" : __final_section_content}
 
-# graph = ResearchGraph("005")
-# result = graph.graph.invoke({"topic" : "Apple vs Samsung", "output_format" : "Analytical Comparitive Report"})
+# graph = ResearchGraph("006")
+# result = graph.graph.invoke({"topic" : "New and Upcoming Business Ideas and Opportinities", "output_format" : "Detailed Report"})

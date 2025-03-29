@@ -74,9 +74,7 @@ class Editor(BaseModel):
 
 class Perspectives(BaseModel):
     editors: List[Editor] = Field(
-        description="Comprehensive list of editors with their roles and affiliations.",
-        min_length=2,
-        max_length=10
+        description="Comprehensive list of editors with their roles and affiliations."
     )
 
 class ContentSection(BaseModel):
