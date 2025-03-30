@@ -127,7 +127,7 @@ class Nodes:
                 and would consist keywords or phrases, but do not use AND, OR, NOT operators, instead, call this tool multiple times at once with different keywords or phrases and \
                 calling this tool before going for web_search_tool is recommended
                 
-                web_search_tool - This tool would help you retrieve the relevant documents from the web based on the search query which would be in string format and would \
+                __web_search_tool - This tool would help you retrieve the relevant documents from the web based on the search query which would be in string format and would \
                 consist keywords or phrases, but do not use AND, OR, NOT operators, instead, call this tool multiple times at once with different keywords or phrases and \
                 calling this tool after vector_search_tool if no relevant documents are found in the vector store is recommended
                 

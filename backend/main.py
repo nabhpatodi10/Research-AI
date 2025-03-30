@@ -82,9 +82,9 @@ async def chat_endpoint(request: ChatRequest):
         # Build initial state with the user message
         state = {"messages": [user_message]}
         # Instantiate a new ChatAgent per request using the provided system messages
-        chat_agent = ChatAgent(session_id, system_messages)
+        chat_agent = ChatAgent(session_id, system_messages, app.state.browser)
         # Invoke the agent's state graph asynchronously
-        result = await run_in_threadpool(chat_agent.graph.invoke, state)
+        result = await chat_agent.graph.ainvoke(state)
         final_messages = result.get("messages", [])
         if not final_messages:
             raise Exception("No response from chat agent")

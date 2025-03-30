@@ -10,6 +10,8 @@ from langchain_core.tools import tool
 
 from langchain_openai import ChatOpenAI
 from openai import RateLimitError
+from playwright.async_api import Browser
+import asyncio
 
 import structures
 from database import Database
@@ -17,13 +19,14 @@ from chains import Chains
 
 class ChatAgent:
 
-    def __web_search_tool(self, query: str) -> list[Document]:
+    async def __web_search_tool(self, query: str) -> list[Document]:
         """Web Search tool to access documents from the web based on the given search query"""
-        self.__chains = Chains(self.__database)
+        self.__chains = Chains(self.__database, self.__browser)
         __urls =  self.__chains.web_search({query: 10})
-        return self.__chains.web_scrape(__urls)
+        return await self.__chains.web_scrape(__urls)
 
-    def __init__(self, session_id: str, system_message: list[SystemMessage], model: ChatOpenAI = ChatOpenAI(model = "gpt-4o-mini")):
+    def __init__(self, session_id: str, system_message: list[SystemMessage], browser: Browser, model: ChatOpenAI = ChatOpenAI(model = "gpt-4o-mini")):
+        self.__browser = browser
         self.__system_message = system_message
         __graph = StateGraph(structures.AgentState)
         __graph.add_node("llm", self.__call_llm)
@@ -43,26 +46,24 @@ class ChatAgent:
 
     def __call_llm(self, state: structures.AgentState):
         try:
-            print("State Message len", len(state["messages"]))
             if len(state["messages"]) <= 2:
+                self.__database.add_human_message(state["messages"][-1].content)
                 previous_messages = self.__database.get_messages()
-                print("Previous Messages len", len(previous_messages))
                 for i in range(len(previous_messages)-1, -1, -1):
                     if previous_messages[i].content[0] in ["URLs", "Document Outline", "Perspectives", "Expert Section Content"]:
                         previous_messages.pop(i)
                     else:
                         previous_messages[i].content = str(previous_messages[i].content)
                 state["messages"] = previous_messages + state["messages"]
-            print("State Message len", len(state["messages"]))
             messages = self.__system_message + state["messages"]
             message = self.__model.invoke(messages)
-            print("LLM Worked")
+            self.__database.add_ai_message(message.content)
             return {"messages" : [message]}
         except RateLimitError:
             time.sleep(10)
             self.__call_llm(state)
 
-    def __take_action(self, state: structures.AgentState):
+    async def __take_action(self, state: structures.AgentState):
         tool_calls = state["messages"][-1].tool_calls
         results = []
         for t in tool_calls:
@@ -71,7 +72,10 @@ class ChatAgent:
                 result = "bad tool name, retry"
                 print(result)
             else:
-                result = self.__tools[t["name"]].invoke(t["args"])
+                if t["name"] == "__web_search_tool":
+                    result = await self.__tools[t["name"]].ainvoke(t["args"])
+                elif t["name"] == "vector_search_tool":
+                    result = self.__tools[t["name"]].invoke(t["args"])
                 if isinstance(result, list):
                     output = ""
                     for i in range(len(result)):
