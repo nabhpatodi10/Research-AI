@@ -1,0 +1,8 @@
+@import "tailwindcss";
+@import 'highlight.js/styles/github.css';
+
+.hljs {
+  background: #f6f8fa !important;
+  border-radius: 6px;
+  padding: 1em !important;
+}

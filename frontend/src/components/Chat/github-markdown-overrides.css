@@ -1,0 +1,45 @@
+.markdown-body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    color: #24292f;
+    background-color: #f9fafb;
+  }
+  
+  .markdown-body pre {
+    border-radius: 6px;
+    padding: 16px;
+    overflow: auto;
+  }
+  
+  .markdown-body code:not(.hljs) {
+    background-color: rgba(175,184,193,0.2);
+    padding: 0.2em 0.4em;
+    border-radius: 6px;
+  }
+  
+  .markdown-body table {
+    border-spacing: 0;
+    border-collapse: collapse;
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow: auto;
+  }
+  
+  .markdown-body th {
+    font-weight: 600;
+    padding: 6px 13px;
+    border: 1px solid #d0d7de;
+  }
+  
+  .markdown-body td {
+    padding: 6px 13px;
+    border: 1px solid #d0d7de;
+  }
+  
+  .markdown-body img {
+    max-width: 100%;
+    box-sizing: content-box;
+    background-color: #f9fafb;
+  }
