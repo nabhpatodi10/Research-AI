@@ -95,7 +95,10 @@ class ResearchGraph:
             raise error
     
     def __document_outline_generation(self, state: graphSchema):
-        __outlines = self.__chains.get_document_outline(state["documents"])
+        try:
+            __outlines = self.__chains.get_document_outline(state["documents"])
+        except Exception as error:
+            __outlines = self.__chains.get_document_outline(state["documents"][:len(state["documents"]) - (len(state["documents"])//4)])
         try:
             document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines))
             self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))

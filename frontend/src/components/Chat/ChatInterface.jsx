@@ -10,7 +10,7 @@ export default function ChatInterface() {
   const [topic, setTopic] = useState('');
   const [outputFormat, setOutputFormat] = useState('');
   const [sessionId, setSessionId] = useState(null);
-  const [setResearchContent] = useState(null);
+  const [researchContent, setResearchContent] = useState(null);
 
   const handleNewChat = () => {
     setIsNewChat(true);
