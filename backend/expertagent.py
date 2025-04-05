@@ -5,6 +5,7 @@ from langchain_core.documents import Document
 
 from langchain_openai import ChatOpenAI
 from openai import RateLimitError
+import json
 
 import structures
 
@@ -36,28 +37,33 @@ class ExpertAgent:
             self.__call_llm(state)
     
     def __take_action(self, state: structures.AgentState):
-        tool_calls = state["messages"][-1].tool_calls
-        results = []
-        for t in tool_calls:
-            print(f"Calling: {t}")
-            if not t["name"] in self.__tools:
-                result = "bad tool name, retry"
-                print(result)
-            else:
-                result = self.__tools[t["name"]].invoke(t["args"])
-                if isinstance(result, list):
-                    output = ""
-                    for i in range(len(result)):
-                        if isinstance(result[i], Document):
-                            output += f"Document {i+1}:\n{result[i].page_content}\nSource: {result[i].metadata['source']}\n\n"
-                    if output == "":
-                        output = "No documents found"
-                    result = output
+        try:
+            tool_calls = state["messages"][-1].tool_calls
+            results = []
+            for t in tool_calls:
+                print(f"Calling: {t}")
+                if not t["name"] in self.__tools:
+                    result = "bad tool name, retry"
+                    print(result)
                 else:
-                    result = "Invalid tool output, try again"
-            results.append(ToolMessage(tool_call_id = t["id"], name = t["name"], content = str(result)))
-        print("Back to the model!")
-        return {"messages" : results}
+                    result = self.__tools[t["name"]].invoke(t["args"])
+                    if isinstance(result, list):
+                        output = ""
+                        for i in range(len(result)):
+                            if isinstance(result[i], Document):
+                                content = json.loads(result[i].page_content)
+                                output += f"Document {i+1}:\n{content["content"]}\nSource: {content["metadata"]["source"]}\n\n"
+                        if output == "":
+                            output = "No documents found"
+                        result = output
+                    else:
+                        result = "Invalid tool output, try again"
+                results.append(ToolMessage(tool_call_id = t["id"], name = t["name"], content = str(result)))
+            print("Back to the model!")
+            return {"messages" : results}
+        except Exception as error:
+            print(error)
+            raise error
     
     def __check_action(self, state: structures.AgentState):
         return len(state["messages"][-1].tool_calls) > 0

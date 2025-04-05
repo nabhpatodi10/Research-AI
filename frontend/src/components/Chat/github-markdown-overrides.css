@@ -13,12 +13,18 @@
   }
   
   .markdown-body code:not(.hljs) {
-    background-color: rgba(175,184,193,0.2);
+    background-color: #f9fafb;
     padding: 0.2em 0.4em;
     border-radius: 6px;
   }
   
   .markdown-body table {
+    background-color: inherit;
+    color: inherit;
+    --bgColor-default: #f9fafb;
+    --bgColor-muted: #f9fafb;
+    --fgColor-default: #24292f;
+    --fgColor-muted: #24292f;
     border-spacing: 0;
     border-collapse: collapse;
     display: block;

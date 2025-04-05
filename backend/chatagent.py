@@ -5,13 +5,13 @@ import time
 from langchain_core.messages import ToolMessage
 from langgraph.graph import StateGraph, END
 from langchain_core.documents import Document
-from langchain_core.messages import SystemMessage, HumanMessage, AnyMessage
+from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
 from langchain_core.tools import tool
 
 from langchain_openai import ChatOpenAI
 from openai import RateLimitError
 from playwright.async_api import Browser
-import asyncio
+import json
 
 import structures
 from database import Database
@@ -47,7 +47,7 @@ class ChatAgent:
     def __call_llm(self, state: structures.AgentState):
         try:
             if len(state["messages"]) <= 2:
-                self.__database.add_human_message(state["messages"][-1].content)
+                self.__database.add_human_message(HumanMessage(content=["User Input", state["messages"][-1].content]))
                 previous_messages = self.__database.get_messages()
                 for i in range(len(previous_messages)-1, -1, -1):
                     if previous_messages[i].content[0] in ["URLs", "Document Outline", "Perspectives", "Expert Section Content"]:
@@ -57,7 +57,6 @@ class ChatAgent:
                 state["messages"] = previous_messages + state["messages"]
             messages = self.__system_message + state["messages"]
             message = self.__model.invoke(messages)
-            self.__database.add_ai_message(message.content)
             return {"messages" : [message]}
         except RateLimitError:
             time.sleep(10)
@@ -80,7 +79,11 @@ class ChatAgent:
                     output = ""
                     for i in range(len(result)):
                         if isinstance(result[i], Document):
-                            output += f"Document {i+1}:\n{result[i].page_content}\nSource: {result[i].metadata['source']}\n\n"
+                            try:
+                                content = json.loads(result[i].page_content)
+                                output += f"Document {i+1}:\n{content["content"]}\nSource: {content["metadata"]["source"]}\n\n"
+                            except:
+                                output += f"Document {i+1}:\n{result[i].page_content}\nSource: {result[i].metadata['source']}\n\n"
                     if output == "":
                         output = "No documents found"
                     result = output
@@ -91,16 +94,22 @@ class ChatAgent:
         return {"messages" : results}
 
     def __check_action(self, state: structures.AgentState):
-        return len(state["messages"][-1].tool_calls) > 0
+        if len(state["messages"][-1].tool_calls) > 0:
+            return True
+        else:
+            self.__database.add_ai_message(AIMessage(content=["Chat", state["messages"][-1].content]))
+            return False
     
 # from nodes import Nodes
-# agent = ChatAgent("005", Nodes().chat_agent())
-# previous_messages = Database("005").get_messages()
+# agent = ChatAgent("b1728310-d7b9-4897-b2d3-1f413689e692", Nodes().chat_agent())
+# previous_messages = Database("380442e4-255e-4a13-827a-c0f2c24d522a").vector_search_tool()
 # for i in range(len(previous_messages)-1, -1, -1):
 #     if previous_messages[i].content[0] in ["URLs", "Document Outline", "Perspectives", "Expert Section Content"]:
 #         previous_messages.pop(i)
 #     else:
+#         print("Before String", previous_messages[i].content[1], type(previous_messages[i].content[1]))
 #         previous_messages[i].content = str(previous_messages[i].content)
+#     print("\n\n\n")
 # previous_messages.append(HumanMessage(content="List out the difference between S23 ultra and iPhone 15 pro"))
-# output = agent.graph.invoke({"messages": previous_messages})
+# output = agent.graph.invoke({"messages": ["give me a list of all the latest and upcoming LLMs and give me a comparison table for them"]})
 # print(output["messages"][-1].content)

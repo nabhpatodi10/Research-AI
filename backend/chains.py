@@ -72,6 +72,7 @@ class Chains:
             documents = await asyncio.gather(*scrape_tasks)
 
             finaldocs = [doc for doc in documents if doc is not None]
+            self.__database.add_data(finaldocs)
             print(f"\n\nTotal Documents: {len(finaldocs)}\n\n")
             return finaldocs
         except Exception as error:
@@ -85,8 +86,9 @@ class Chains:
         try:
             __outlines = self.__model.with_structured_output(schema=structures.Outline, method="json_schema").batch(batch)
         except RateLimitError:
-            time.sleep(10)
+            time.sleep(20)
             __outlines = self.__model.with_structured_output(schema=structures.Outline, method="json_schema").batch(batch[len(batch)//2:])
+            time.sleep(20)
             __outlines += self.__model.with_structured_output(schema=structures.Outline, method="json_schema").batch(batch[:len(batch)//2])
 
         __stroutlines = ""
