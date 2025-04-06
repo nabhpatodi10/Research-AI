@@ -22,7 +22,7 @@ Research AI is a full-stack application that combines FastAPI, React, and Fireba
 - **Multiple LLM Support**: Integration with Groq, OpenAI, and Gemini models
 - **Graph and Agent based Research**: Advanced research graphs, agents and chains using LangGraph and LangChain
 #### Research Graph Architecture
-![](backend\Images\Graph.png)
+![Graph Architecture](backend/Images/Graph.png)
 
 ### Frontend
 
@@ -33,22 +33,22 @@ Research AI is a full-stack application that combines FastAPI, React, and Fireba
 
 #### Website Pages
 Landing Page
-![Landing Page](frontend\Images\Landing_Page.jpeg)
+![Landing Page](frontend/Images/Landing_Page.jpeg)
 
 Signup Page
-![Signup Page](frontend\Images\Signup_Page.jpeg)
+![Signup Page](frontend/Images/Signup_Page.jpeg)
 
 Login Page
-![Login Page](frontend\Images\Login_Page.jpeg)
+![Login Page](frontend/Images/Login_Page.jpeg)
 
 New Chat Page
-![New Chat Page](frontend\Images\New_Chat_Page.jpeg)
+![New Chat Page](frontend/Images/New_Chat_Page.jpeg)
 
 Previous Chat Page
-![Previous Chat Page](frontend\Images\Previous_Chat_Page.jpeg)
+![Previous Chat Page](frontend/Images/Previous_Chat_Page.jpeg)
 
 Feedback Page
-![Feedback Page](frontend\Images\Feedback_Page.jpeg)
+![Feedback Page](frontend/Images/Feedback_Page.jpeg)
 
 ## Getting Started
 
