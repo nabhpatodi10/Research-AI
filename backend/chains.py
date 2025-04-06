@@ -49,24 +49,6 @@ class Chains:
             raise error
         
     async def web_scrape(self, urls: dict[str, str]) -> list[Document]:
-        # __chains = []
-        # for i in range(len(urls)):
-        #     __chains.append(RunnableLambda(lambda input, i=i: self.__scrape.scrape(input[f"chain{i}"][0], input[f"chain{i}"][1])))
-        
-        # __final_chain = RunnableParallel({f"chain{i}" : chain for i, chain in enumerate(__chains)})
-
-        # try:
-        #     __documents = __final_chain.invoke({f"chain{i}" : (url, title) for i, (url, title) in enumerate(urls.items())})
-        #     __finaldocs = []
-        #     for i in __documents:
-        #         if __documents[i]:
-        #             __finaldocs.append(__documents[i])
-        #     print(f"\n\nTotal Documents: {len(__finaldocs)}\n\n")
-        #     return __finaldocs
-        
-        # except Exception as error:
-        #     raise error
-
         try:
             scrape_tasks = [self.__scrape.scrape(url, title) for url, title in urls.items()]
             documents = await asyncio.gather(*scrape_tasks)

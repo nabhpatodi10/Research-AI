@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { useState, useEffect, Fragment } from 'react';
+import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import ChatHistory from './ChatHistory';
 import MarkdownRenderer from './MarkdownRenderer';
+import { Dialog, Transition } from '@headlessui/react';
 
 // Helper function to parse Python-style strings to JSON
 const parseContentString = (contentStr) => {
@@ -130,6 +131,10 @@ export default function ChatInterface() {
   const [outputFormat, setOutputFormat] = useState('');
   const [sessionId, setSessionId] = useState(null);
   const [researchContent, setResearchContent] = useState(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [shareEmail, setShareEmail] = useState('');
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareError, setShareError] = useState('');
 
   useEffect(() => {
     const saveChatSession = async () => {
@@ -353,10 +358,127 @@ export default function ChatInterface() {
     );
   };
 
+  const handleShareClick = () => setIsShareModalOpen(true);
+
+  const handleShareSubmit = async (e) => {
+    e.preventDefault();
+    setShareLoading(true);
+    setShareError('');
+
+    try {
+      // Find user by email
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('email', '==', shareEmail));
+      const querySnapshot = await getDocs(q);
+      
+      if (querySnapshot.empty) {
+        throw new Error('User not found');
+      }
+
+      const userDoc = querySnapshot.docs[0];
+      const targetUserId = userDoc.id;
+
+      // Add the session to recipient's user_chats
+      const targetUserChatsRef = doc(db, 'user_chats', targetUserId);
+      await setDoc(targetUserChatsRef, {
+        sessions: {
+          [sessionId]: {
+            topic: topic,
+            createdAt: new Date(),
+            sharedBy: currentUser.email,
+            isShared: true
+          }
+        }
+      }, { merge: true });
+
+      setIsShareModalOpen(false);
+      setShareEmail('');
+    } catch (error) {
+      console.error('Sharing error:', error);
+      setShareError(error.message || 'Failed to share chat');
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
   return (
     <div className="flex h-screen bg-gray-100">
+
+      {/* Share Modal */}
+      <Transition appear show={isShareModalOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-10" onClose={() => setIsShareModalOpen(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-300"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-200"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black bg-opacity-25" />
+          </Transition.Child>
+
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center p-4 text-center">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-300"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-200"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-xl transition-all">
+                  <Dialog.Title className="text-lg font-medium leading-6 text-gray-900">
+                    Share Chat Session
+                  </Dialog.Title>
+
+                  <form onSubmit={handleShareSubmit} className="mt-4 space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">
+                        Recipient Email
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={shareEmail}
+                        onChange={(e) => setShareEmail(e.target.value)}
+                        className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                      />
+                    </div>
+
+                    {shareError && (
+                      <p className="text-red-500 text-sm">{shareError}</p>
+                    )}
+
+                    <div className="flex justify-end space-x-4">
+                      <button
+                        type="button"
+                        onClick={() => setIsShareModalOpen(false)}
+                        className="inline-flex justify-center rounded-md border border-transparent bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={shareLoading}
+                        className="inline-flex justify-center rounded-md border border-transparent bg-blue-900 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none disabled:opacity-50"
+                      >
+                        {shareLoading ? 'Sharing...' : 'Share'}
+                      </button>
+                    </div>
+                  </form>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
       {/* Sidebar */}
-      <div className="w-64 bg-white border-r border-gray-200 pt-16">
+      <div className="w-4/25 bg-white border-r border-gray-200 pt-16">
         <div className="p-4 border-b border-gray-200">
           <h1 className="text-xl font-bold">ResearchAI</h1>
         </div>
@@ -381,11 +503,19 @@ export default function ChatInterface() {
       </div>
       
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col pt-16">
+      <div className="flex-1 flex flex-col w-21/25 pt-16">
         <div className="p-4 border-b border-gray-200 bg-white">
           <h2 className="text-lg font-semibold">
             {sessionId ? `Research: ${topic}` : 'New Research Session'}
           </h2>
+          {sessionId && (
+            <button
+              onClick={handleShareClick}
+              className="px-3 py-1 text-sm bg-blue-900 text-white rounded hover:bg-blue-700"
+            >
+              Share
+            </button>
+          )}
         </div>
         
         <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-24">

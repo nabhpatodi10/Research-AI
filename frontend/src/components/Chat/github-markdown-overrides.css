@@ -5,6 +5,10 @@
     color: #24292f;
     background-color: #f9fafb;
   }
+
+  .markdown-body a {
+    color: #0059ff;
+  }
   
   .markdown-body pre {
     border-radius: 6px;
@@ -13,18 +17,18 @@
   }
   
   .markdown-body code:not(.hljs) {
-    background-color: #f9fafb;
+    color: #f9fafb;
+    --bgColor-neutral-muted: #656c76;
     padding: 0.2em 0.4em;
     border-radius: 6px;
   }
   
   .markdown-body table {
-    background-color: inherit;
-    color: inherit;
-    --bgColor-default: #f9fafb;
-    --bgColor-muted: #f9fafb;
-    --fgColor-default: #24292f;
-    --fgColor-muted: #24292f;
+    color: #f9fafb;
+    --bgColor-default: #24292f;
+    --bgColor-muted: #24292f;
+    --fgColor-default: #f9fafb;
+    --fgColor-muted: #f9fafb;
     border-spacing: 0;
     border-collapse: collapse;
     display: block;

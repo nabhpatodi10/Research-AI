@@ -99,17 +99,3 @@ class ChatAgent:
         else:
             self.__database.add_ai_message(AIMessage(content=["Chat", state["messages"][-1].content]))
             return False
-    
-# from nodes import Nodes
-# agent = ChatAgent("b1728310-d7b9-4897-b2d3-1f413689e692", Nodes().chat_agent())
-# previous_messages = Database("380442e4-255e-4a13-827a-c0f2c24d522a").vector_search_tool()
-# for i in range(len(previous_messages)-1, -1, -1):
-#     if previous_messages[i].content[0] in ["URLs", "Document Outline", "Perspectives", "Expert Section Content"]:
-#         previous_messages.pop(i)
-#     else:
-#         print("Before String", previous_messages[i].content[1], type(previous_messages[i].content[1]))
-#         previous_messages[i].content = str(previous_messages[i].content)
-#     print("\n\n\n")
-# previous_messages.append(HumanMessage(content="List out the difference between S23 ultra and iPhone 15 pro"))
-# output = agent.graph.invoke({"messages": ["give me a list of all the latest and upcoming LLMs and give me a comparison table for them"]})
-# print(output["messages"][-1].content)

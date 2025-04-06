@@ -22,7 +22,9 @@ export default function ChatHistory({ onChatSelect }) {
               id,
               topic: typeof session === 'string' ? session : 
                     (session.topic || 'Untitled Session'),
-              createdAt: session.createdAt?.toDate?.() || new Date()
+              createdAt: session.createdAt?.toDate?.() || new Date(),
+              isShared: session.isShared || false,
+              sharedBy: session.sharedBy || null
             })).sort((a, b) => b.createdAt - a.createdAt);
             setSessions(sessionsArray);
             setError(null);
@@ -58,7 +60,12 @@ export default function ChatHistory({ onChatSelect }) {
           onClick={() => onChatSelect(session.id)}
           className="w-full text-left p-2 hover:bg-gray-100 rounded text-sm transition-colors"
         >
-          <div className="font-medium truncate">{session.topic}</div>
+          <div className="font-medium truncate">
+            {session.topic}
+            {session.isShared && (
+              <span className="text-xs text-gray-500 ml-2">(Shared by {session.sharedBy})</span>
+            )}
+          </div>
           <div className="text-xs text-gray-500">
             {session.createdAt.toLocaleDateString()}
           </div>

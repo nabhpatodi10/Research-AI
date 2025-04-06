@@ -2,7 +2,11 @@
 @import 'highlight.js/styles/github.css';
 
 .hljs {
-  background: #f6f8fa !important;
+  color: #f9fafb;
   border-radius: 6px;
   padding: 1em !important;
+}
+
+.hljs-string {
+  color: #ffe4c4!important;
 }

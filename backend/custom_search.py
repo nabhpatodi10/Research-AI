@@ -1,12 +1,9 @@
 import os
 from googleapiclient.discovery import build
-from authorisation import authorisation
 
 class CustomSearch:
     def __init__(self):
-        self.__auth = authorisation()
-        self.__creds = self.__auth.cred_token_auth()
-        self.__service = build("customsearch", "v1", credentials=self.__creds)
+        self.__service = build("customsearch", "v1", developerKey=os.getenv("GEMINI_API_KEY"))
     
     def search(self, query: str, num: int) -> dict[str, str]:
         try:

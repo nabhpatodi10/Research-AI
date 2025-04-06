@@ -68,7 +68,7 @@ class ResearchGraph:
             self.__model_tools.add_ai_message(AIMessage(content=["Related Topics", result.as_str]))
             return {"related_topics" : result}
         except RateLimitError:
-            time.sleep(10)
+            time.sleep(20)
             result = self.__model.with_structured_output(schema=structures.Related_Topics).invoke(self.__node.get_related_topics(state["topic"]))
             self.__model_tools.add_ai_message(AIMessage(content=["Related Topics", result.as_str]))
             return {"related_topics" : result}
@@ -98,13 +98,14 @@ class ResearchGraph:
         try:
             __outlines = self.__chains.get_document_outline(state["documents"])
         except Exception as error:
+            time.sleep(20)
             __outlines = self.__chains.get_document_outline(state["documents"][:len(state["documents"]) - (len(state["documents"])//4)])
         try:
             document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines))
             self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
             return {"document_outline" : document_outline, "document_outlines" : __outlines}
         except RateLimitError:
-            time.sleep(10)
+            time.sleep(20)
             document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines))
             self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
             return {"document_outline" : document_outline, "document_outlines" : __outlines}
@@ -119,7 +120,7 @@ class ResearchGraph:
             self.__model_tools.add_ai_message(AIMessage(content=["Perspectives"] + [editor.persona for editor in perspectives.editors]))
             return {"perspectives" : perspectives}
         except RateLimitError:
-            time.sleep(10)
+            time.sleep(20)
             perspectives = self.__long_model.with_structured_output(schema=structures.Perspectives, method="json_schema").invoke(self.__node.generate_perspectives(state["topic"], state["document_outlines"]))
             self.__model_tools.add_ai_message(AIMessage(content=["Perspectives"] + [editor.persona for editor in perspectives.editors]))
             return {"perspectives" : perspectives}            
@@ -136,7 +137,7 @@ class ResearchGraph:
                 self.__model_tools.add_ai_message(AIMessage(content=["Expert Section Content", section.section_title] + [content for content in content_list]))
                 __perspective_section_content.append(content_list)
             except RateLimitError:
-                time.sleep(10)
+                time.sleep(30)
                 content_list = self.__chains.generate_perspective_content(state["perspectives"], state["topic"], state["output_format"], state["document_outline"].as_str, section.as_str)
                 self.__model_tools.add_ai_message(AIMessage(content=["Expert Section Content", section.section_title] + [content for content in content_list]))
                 __perspective_section_content.append(content_list)
@@ -155,10 +156,12 @@ class ResearchGraph:
         try:
             __final_section_content = self.__long_model.with_structured_output(schema=structures.ContentSection, method="json_schema").batch(batch)
         except RateLimitError:
-            time.sleep(10)
+            time.sleep(20)
             __final_section_content = self.__long_model.with_structured_output(schema=structures.ContentSection, method="json_schema").batch(batch[len(batch)//2:])
+            time.sleep(20)
             __final_section_content += self.__long_model.with_structured_output(schema=structures.ContentSection, method="json_schema").batch(batch[:len(batch)//2])
         except Exception:
+            time.sleep(60)
             __final_section_content = self.__long_model.with_structured_output(schema=structures.ContentSection, method="json_schema").batch(batch)
 
         __final_document = structures.CompleteDocument(

@@ -1,7 +1,8 @@
 import { signInWithEmailAndPassword, signInWithPopup } from 'firebase/auth';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { auth, googleProvider } from '../../firebase';
+import { auth, googleProvider, db } from '../../firebase';
+import { doc, setDoc, getDoc, writeBatch } from 'firebase/firestore';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -13,11 +14,34 @@ export default function Login() {
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
-      await signInWithPopup(auth, googleProvider);
+      const userCredential = await signInWithPopup(auth, googleProvider);
+      
+      // Use batch write for atomic operations
+      const batch = writeBatch(db);
+      
+      const userRef = doc(db, 'users', userCredential.user.uid);
+      const userDoc = await getDoc(userRef);
+  
+      if (!userDoc.exists()) {
+        batch.set(userRef, {
+          uid: userCredential.user.uid,
+          name: userCredential.user.displayName,
+          email: userCredential.user.email,
+          provider: 'google',
+          createdAt: new Date(),
+          lastLogin: new Date()
+        });
+      } else {
+        batch.update(userRef, {
+          lastLogin: new Date()
+        });
+      }
+  
+      await batch.commit();
       navigate('/chat');
     } catch (err) {
-      setError('Failed to login with Google');
-      console.error(err);
+      console.error('Google login error:', err);
+      setError(err.message || 'Failed to login with Google');
     }
     setLoading(false);
   };
@@ -27,7 +51,13 @@ export default function Login() {
     try {
       setError('');
       setLoading(true);
-      await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      
+      // Update last login time
+      await setDoc(doc(db, 'users', userCredential.user.uid), {
+        lastLogin: new Date()
+      }, { merge: true });
+      
       navigate('/chat');
     } catch (err) {
       setError('Failed to login');
