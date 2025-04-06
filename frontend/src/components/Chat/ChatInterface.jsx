@@ -480,7 +480,7 @@ export default function ChatInterface() {
       {/* Sidebar */}
       <div className="w-4/25 bg-white border-r border-gray-200 pt-16">
         <div className="p-4 border-b border-gray-200">
-          <h1 className="text-xl font-bold">ResearchAI</h1>
+          <h1 className="text-xl font-bold text-blue-900">ResearchAI</h1>
         </div>
         <div className="p-4">
           <div className="mb-4">
@@ -493,11 +493,11 @@ export default function ChatInterface() {
           <div className="space-y-2">
             <button 
               onClick={handleNewChat}
-              className="w-full text-left p-2 hover:bg-gray-100 rounded text-sm font-medium"
+              className="w-full text-left p-2 hover:bg-gray-100 rounded text-sm font-medium hover:text-blue-900"
             >
               + New Chat
             </button>
-            <ChatHistory onChatSelect={loadChat} />
+            <ChatHistory onChatSelect={loadChat}/>
           </div>
         </div>
       </div>
@@ -505,7 +505,7 @@ export default function ChatInterface() {
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col w-21/25 pt-16">
         <div className="p-4 border-b border-gray-200 bg-white">
-          <h2 className="text-lg font-semibold">
+          <h2 className="text-lg font-semibold text-blue-900">
             {sessionId ? `Research: ${topic}` : 'New Research Session'}
           </h2>
           {sessionId && (

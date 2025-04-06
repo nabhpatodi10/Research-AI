@@ -58,12 +58,14 @@ export default function ChatHistory({ onChatSelect }) {
         <button
           key={session.id}
           onClick={() => onChatSelect(session.id)}
-          className="w-full text-left p-2 hover:bg-gray-100 rounded text-sm transition-colors"
+          className="w-full text-left p-2 hover:bg-gray-100 hover:text-blue-900 rounded text-sm transition-colors"
         >
           <div className="font-medium truncate">
             {session.topic}
+          </div>
+          <div>
             {session.isShared && (
-              <span className="text-xs text-gray-500 ml-2">(Shared by {session.sharedBy})</span>
+                <span className="text-xs text-gray-500">Shared by {session.sharedBy}</span>
             )}
           </div>
           <div className="text-xs text-gray-500">
