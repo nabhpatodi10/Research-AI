@@ -25,7 +25,7 @@ class ChatAgent:
         __urls =  self.__chains.web_search({query: 10})
         return await self.__chains.web_scrape(__urls)
 
-    def __init__(self, session_id: str, system_message: list[SystemMessage], browser: Browser, model: ChatOpenAI = ChatOpenAI(model = "gpt-4o-mini")):
+    def __init__(self, session_id: str, system_message: list[SystemMessage], browser: Browser, model: ChatOpenAI = ChatOpenAI(model = "gpt-4.1-nano")):
         self.__browser = browser
         self.__system_message = system_message
         __graph = StateGraph(structures.AgentState)

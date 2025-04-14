@@ -42,7 +42,7 @@ class ResearchGraph:
         self.__model_tools = Database(session_id)
         self.__chains = Chains(self.__model_tools, browser)
         self.__model = ChatGroq(model = "llama-3.3-70b-versatile")
-        self.__long_model = ChatOpenAI(model = "gpt-4o-mini")
+        self.__long_model = ChatOpenAI(model = "gpt-4.1-nano")
         __graph = StateGraph(graphSchema)
         __graph.add_node("related_topics_generation", self.__related_topics_generation)
         __graph.add_node("web_searching", self.__web_searching)
