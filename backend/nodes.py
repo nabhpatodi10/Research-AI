@@ -52,6 +52,28 @@ class Nodes:
 
         return messages
     
+    def generate_outline_from_user(self, topic: str, output_format: str, outline: str, outlines: str) -> list[AnyMessage]:
+        messages = [
+            SystemMessage(
+                content=f"""You are an expert research document writer. Your job is to write the detailed outline of a research document for the provided topic, provided \
+                type of research document and the provided description of the outline of the research document. The outline should consist of all the important major sections \
+                and subsections of the research document with their descriptions and basic information about the content under each of them. Do not add conclusion and \
+                references as subsections at the end of each section. They should be separate sections at the end of the document. Be very comprehensive and specific. \
+                Make sure to follow the provided description of the outline of the research document and add other sections and subsections if required but do not remove \
+                any sections or subsections from the provided description of the outline.
+                
+                You can also refer to the provided outlines for some documents related to the topic for inspiration."""
+            ),
+            HumanMessage(
+                content=f"""Write the outline of a research document in the format {output_format} and on the topic {topic}.
+                
+                You can take inspiration from the following outlines:
+                {outlines}"""
+            )
+        ]
+
+        return messages
+    
     def generate_perspectives(self, topic: str, outlines: str) -> list[AnyMessage]:
         messages = [
             SystemMessage(

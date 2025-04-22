@@ -50,6 +50,7 @@ class ResearchRequest(BaseModel):
     session_id: str = None
     topic: str
     output_format: str
+    outline: str = None
 
 class ResearchResponse(BaseModel):
     session_id: str
@@ -57,7 +58,7 @@ class ResearchResponse(BaseModel):
 
 # Models for Chat endpoint
 class ChatRequest(BaseModel):
-    session_id: str = None
+    session_id: str
     user_input: str
 
 class ChatResponse(BaseModel):
@@ -74,10 +75,17 @@ async def research_endpoint(request: ResearchRequest):
         # Create a new ResearchGraph instance per request
         research_graph = ResearchGraph(session_id, app.state.browser)
         # Prepare the input state; the graph expects at least "topic" and "output_format"
-        input_state = {
-            "topic": request.topic,
-            "output_format": request.output_format
-        }
+        if request.outline:
+            input_state = {
+                "topic": request.topic,
+                "output_format": request.output_format,
+                "user_outline": request.outline
+            }
+        else:
+            input_state = {
+                "topic": request.topic,
+                "output_format": request.output_format
+            }
         # Invoke the state graph asynchronously
         result = await research_graph.graph.ainvoke(input_state)
         final_content = result.get("final_content", [])

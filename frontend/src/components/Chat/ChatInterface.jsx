@@ -129,6 +129,7 @@ export default function ChatInterface() {
   const [isNewChat, setIsNewChat] = useState(true);
   const [topic, setTopic] = useState('');
   const [outputFormat, setOutputFormat] = useState('');
+  const [outline, setOutline] = useState('');
   const [sessionId, setSessionId] = useState(null);
   const [researchContent, setResearchContent] = useState(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
@@ -158,6 +159,7 @@ export default function ChatInterface() {
     setIsNewChat(true);
     setTopic('');
     setOutputFormat('');
+    setOutline('');
     setMessages([]);
     setSessionId(null);
     setResearchContent(null);
@@ -176,7 +178,8 @@ export default function ChatInterface() {
         },
         body: JSON.stringify({
           topic,
-          output_format: outputFormat
+          output_format: outputFormat,
+          outline: outline
         }),
       });
 
@@ -189,7 +192,7 @@ export default function ChatInterface() {
       setMessages(prev => [
         ...prev,
         {
-          text: `Research session started\nTopic: ${topic}\nOutput Format: ${outputFormat}`,
+          text: `Topic: ${topic}\nOutput Format: ${outputFormat}`,
           sender: 'user'
         },
         {
@@ -543,6 +546,15 @@ export default function ChatInterface() {
                         placeholder="Output Format (e.g., Report, Summary)"
                         className="w-full p-3 border border-gray-300 rounded text-sm"
                         required
+                      />
+                    </div>
+                    <div>
+                      <input
+                        type="text"
+                        value={outline}
+                        onChange={(e) => setOutline(e.target.value)}
+                        placeholder="Outline (Optional)"
+                        className="w-full p-3 border border-gray-300 rounded text-sm"
                       />
                     </div>
                     <button

@@ -11,7 +11,7 @@ import structures
 
 class ExpertAgent:
 
-    def __init__(self, tools: list, model: ChatOpenAI = ChatOpenAI(model = "gpt-4.1-nano")):
+    def __init__(self, tools: list, model: ChatOpenAI = ChatOpenAI(model = "gpt-4.1-mini")):
 
         __graph = StateGraph(structures.AgentState)
         __graph.add_node("llm", self.__call_llm)

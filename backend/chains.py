@@ -23,7 +23,7 @@ class Chains:
     __scrape: Scrape
 
     def __init__(self, database: Database, browser: Browser):
-        self.__model = ChatOpenAI(model = "gpt-4o-mini")
+        self.__model = ChatOpenAI(model = "gpt-4.1-nano")
         self.__node = Nodes()
         self.__customSearch = CustomSearch()
         self.__scrape = Scrape(browser)

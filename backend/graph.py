@@ -24,6 +24,7 @@ class graphSchema(TypedDict):
     urls: dict[str, str]
     documents: List[Document]
     document_outlines: str
+    user_outline: str
     document_outline: structures.Outline
     perspectives: structures.Perspectives
     perspective_content: List[List[str]]
@@ -42,7 +43,7 @@ class ResearchGraph:
         self.__model_tools = Database(session_id)
         self.__chains = Chains(self.__model_tools, browser)
         self.__model = ChatGroq(model = "llama-3.3-70b-versatile")
-        self.__long_model = ChatOpenAI(model = "gpt-4.1-nano")
+        self.__long_model = ChatOpenAI(model = "gpt-4.1-mini")
         __graph = StateGraph(graphSchema)
         __graph.add_node("related_topics_generation", self.__related_topics_generation)
         __graph.add_node("web_searching", self.__web_searching)
@@ -101,17 +102,29 @@ class ResearchGraph:
             time.sleep(20)
             __outlines = self.__chains.get_document_outline(state["documents"][:len(state["documents"]) - (len(state["documents"])//4)])
         try:
-            document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines))
-            self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
+            if "user_outline" in state and state["user_outline"]:
+                document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline_from_user(state["topic"], state["output_format"], __outlines, state["user_outline"]))
+                self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
+            else:
+                document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines))
+                self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
             return {"document_outline" : document_outline, "document_outlines" : __outlines}
         except RateLimitError:
             time.sleep(20)
-            document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines))
-            self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
+            if "user_outline" in state and state["user_outline"]:
+                document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline_from_user(state["topic"], state["output_format"], __outlines, state["user_outline"]))
+                self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
+            else:
+                document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines))
+                self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
             return {"document_outline" : document_outline, "document_outlines" : __outlines}
         except Exception:
-            document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines))
-            self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
+            if "user_outline" in state and state["user_outline"]:
+                document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline_from_user(state["topic"], state["output_format"], __outlines, state["user_outline"]))
+                self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
+            else:
+                document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline(state["topic"], state["output_format"], __outlines))
+                self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
             return {"document_outline" : document_outline, "document_outlines" : __outlines}
 
     def __perspectives_generation(self, state: graphSchema):
