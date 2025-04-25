@@ -29,17 +29,17 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Research-AI Backend", lifespan=lifespan)
 
 origins = [
-    "http://localhost",
     "http://localhost:8080",
     "http://localhost:3000",
     "http://localhost:3001",
-    "http://127.0.0.1:3000"
+    "https://research-ai-three.vercel.app",
+    "https://research-ai-three.vercel.app/"
     # Add other origins as needed
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows specified origins
+    allow_origins=origins,  # Allows specified origins
     allow_credentials=True,
     allow_methods=["*"],    # Allows all methods
     allow_headers=["*"],    # Allows all headers
