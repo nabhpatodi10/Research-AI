@@ -485,7 +485,7 @@ export default function ChatInterface() {
         <div className="p-4 border-b border-gray-200">
           <h1 className="text-xl font-bold text-blue-900">ResearchAI</h1>
         </div>
-        <div className="p-4">
+        <div className="p-4 overflow-y-scroll no-scrollbar h-full">
           <div className="mb-4">
             <input
               type="text"
