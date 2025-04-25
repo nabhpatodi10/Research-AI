@@ -14,7 +14,6 @@ import copy
 class Database:
 
     def __init__(self, session_id: str):
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "service-account-key.json"
         self.__firestore_client = Client(project=os.getenv("GOOGLE_PROJECT_ID"))
         self.__firestore_chat_history = FirestoreChatMessageHistory(session_id=session_id, collection="chats", client=self.__firestore_client, encode_message=False)
         self.__embeddingModel = GoogleGenerativeAIEmbeddings(model = "models/text-embedding-004", google_api_key = os.getenv("GEMINI_API_KEY"))
