@@ -47,14 +47,26 @@ class ChatAgent:
     def __call_llm(self, state: structures.AgentState):
         try:
             if len(state["messages"]) <= 2:
-                self.__database.add_human_message(HumanMessage(content=["User Input", state["messages"][-1].content]))
                 previous_messages = self.__database.get_messages()
                 for i in range(len(previous_messages)-1, -1, -1):
                     if previous_messages[i].content[0] in ["URLs", "Document Outline", "Perspectives", "Expert Section Content"]:
                         previous_messages.pop(i)
                     else:
-                        previous_messages[i].content = str(previous_messages[i].content)
+                        content = eval(previous_messages[i].content)
+                        if isinstance(content, list):
+                            if content[0] == "User Input":
+                                if isinstance(content[1], dict):
+                                    previous_messages[i].content = f"Topic: {content[1]['topic']}\n\nOutput Format: {content[1]['output_format']}"
+                                elif isinstance(content[1], str):
+                                    previous_messages[i].content = content[1]
+                            elif content[0] == "Related Topics":
+                                previous_messages[i].content = f"Topics Searched During Research: {content[1]}"
+                            elif content[0] == "Final Document":
+                                previous_messages[i].content = f"Generated Document after Research (in markdown format):\n\n{content[1]}"
+                            elif content[0] == "Chat":
+                                previous_messages[i].content = content[1]
                 state["messages"] = previous_messages + state["messages"]
+                self.__database.add_human_message(HumanMessage(content=["User Input", state["messages"][-1].content]))
             messages = self.__system_message + state["messages"]
             message = self.__model.invoke(messages)
             return {"messages" : [message]}

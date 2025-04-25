@@ -166,7 +166,8 @@ class Nodes:
                 research topic, other relevant topics and the relevant sections of the research document using the tools and fetch the relevant information and only then write the \
                 content for the section in a detailed and comprehensive manner. Do not forget to cite your sources.
                 
-                If the task is something other than these two, you have to act accordingly to give the best possible response to the user."""
+                If the task is something other than these two, you have to act accordingly to give the best possible response to the user. The final output should be a very well \
+                structured, coherent, and comprehensive markdown formatted response to the user's query."""
             )
         ]
 
