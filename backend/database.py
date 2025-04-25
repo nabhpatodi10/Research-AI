@@ -9,6 +9,7 @@ from uuid import uuid4
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage, AnyMessage
 from langchain_core.tools import tool, BaseTool
+import copy
 
 class Database:
 
@@ -57,7 +58,7 @@ class Database:
         
     def get_messages(self) -> list[AnyMessage]:
         try:
-            return self.__firestore_chat_history.messages
+            return copy.deepcopy(self.__firestore_chat_history.messages)
         except Exception as error:
             raise error
         

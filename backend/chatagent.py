@@ -52,7 +52,7 @@ class ChatAgent:
                     if previous_messages[i].content[0] in ["URLs", "Document Outline", "Perspectives", "Expert Section Content"]:
                         previous_messages.pop(i)
                     else:
-                        content = eval(previous_messages[i].content)
+                        content = previous_messages[i].content
                         if isinstance(content, list):
                             if content[0] == "User Input":
                                 if isinstance(content[1], dict):
