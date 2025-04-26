@@ -33,7 +33,8 @@ origins = [
     "http://localhost:3000",
     "http://localhost:3001",
     "https://research-ai-three.vercel.app",
-    "https://research-ai-three.vercel.app/"
+    "https://research-ai-three.vercel.app/",
+    "https://research-ai-three.vercel.app/chat"
     # Add other origins as needed
 ]
 
