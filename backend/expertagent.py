@@ -35,6 +35,9 @@ class ExpertAgent:
         except RateLimitError:
             time.sleep(20)
             self.__call_llm(state)
+        except Exception:
+            time.sleep(40)
+            self.__call_llm(state)
     
     def __take_action(self, state: structures.AgentState):
         try:

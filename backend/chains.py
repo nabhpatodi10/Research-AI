@@ -72,6 +72,11 @@ class Chains:
             __outlines = self.__model.with_structured_output(schema=structures.Outline, method="json_schema").batch(batch[len(batch)//2:])
             time.sleep(20)
             __outlines += self.__model.with_structured_output(schema=structures.Outline, method="json_schema").batch(batch[:len(batch)//2])
+        except Exception:
+            time.sleep(40)
+            __outlines = self.__model.with_structured_output(schema=structures.Outline, method="json_schema").batch(batch[len(batch)//2:])
+            time.sleep(40)
+            __outlines += self.__model.with_structured_output(schema=structures.Outline, method="json_schema").batch(batch[:len(batch)//2])
 
         __stroutlines = ""
         for i in __outlines:

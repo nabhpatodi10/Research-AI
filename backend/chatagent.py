@@ -71,7 +71,10 @@ class ChatAgent:
             message = self.__model.invoke(messages)
             return {"messages" : [message]}
         except RateLimitError:
-            time.sleep(10)
+            time.sleep(20)
+            self.__call_llm(state)
+        except Exception:
+            time.sleep(40)
             self.__call_llm(state)
 
     async def __take_action(self, state: structures.AgentState):

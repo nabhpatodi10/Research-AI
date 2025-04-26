@@ -74,6 +74,7 @@ class ResearchGraph:
             self.__model_tools.add_ai_message(AIMessage(content=["Related Topics", result.as_str]))
             return {"related_topics" : result}
         except Exception:
+            time.sleep(40)
             result = self.__model.with_structured_output(schema=structures.Related_Topics).invoke(self.__node.get_related_topics(state["topic"]))
             self.__model_tools.add_ai_message(AIMessage(content=["Related Topics", result.as_str]))
             return {"related_topics" : result}
@@ -119,6 +120,7 @@ class ResearchGraph:
                 self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
             return {"document_outline" : document_outline, "document_outlines" : __outlines}
         except Exception:
+            time.sleep(40)
             if "user_outline" in state and state["user_outline"]:
                 document_outline = self.__long_model.with_structured_output(schema=structures.Outline, method="json_schema").invoke(self.__node.generate_outline_from_user(state["topic"], state["output_format"], __outlines, state["user_outline"]))
                 self.__model_tools.add_ai_message(AIMessage(content=["Document Outline", document_outline.as_str]))
@@ -138,6 +140,7 @@ class ResearchGraph:
             self.__model_tools.add_ai_message(AIMessage(content=["Perspectives"] + [editor.persona for editor in perspectives.editors]))
             return {"perspectives" : perspectives}            
         except Exception:
+            time.sleep(40)
             perspectives = self.__long_model.with_structured_output(schema=structures.Perspectives, method="json_schema").invoke(self.__node.generate_perspectives(state["topic"], state["document_outlines"]))
             self.__model_tools.add_ai_message(AIMessage(content=["Perspectives"] + [editor.persona for editor in perspectives.editors]))
             return {"perspectives" : perspectives}
@@ -155,6 +158,7 @@ class ResearchGraph:
                 self.__model_tools.add_ai_message(AIMessage(content=["Expert Section Content", section.section_title] + [content for content in content_list]))
                 __perspective_section_content.append(content_list)
             except Exception:
+                time.sleep(60)
                 content_list = self.__chains.generate_perspective_content(state["perspectives"], state["topic"], state["output_format"], state["document_outline"].as_str, section.as_str)
                 self.__model_tools.add_ai_message(AIMessage(content=["Expert Section Content", section.section_title] + [content for content in content_list]))
                 __perspective_section_content.append(content_list)
