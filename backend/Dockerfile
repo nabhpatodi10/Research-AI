@@ -1,4 +1,4 @@
-FROM python:3.12.7-slim
+FROM python:3.12.7
 
 # set workdir
 WORKDIR /app
@@ -8,7 +8,7 @@ ENV PLAYWRIGHT_DOWNLOAD_HOST=https://playwright.azureedge.net
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN playwright install
+RUN playwright install --with-deps
 
 # copy source
 COPY . .
