@@ -171,7 +171,7 @@ export default function ChatInterface() {
 
     setLoading(true);
     try {
-      const response = await fetch('http://127.0.0.1:8000/research', {
+      const response = await fetch('https://research-ai-backend-313190530690.asia-south2.run.app//research', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -222,7 +222,7 @@ export default function ChatInterface() {
     setMessages(prev => [...prev, userMessage]);
     
     try {
-      const response = await fetch('http://127.0.0.1:8000/chat', {
+      const response = await fetch('https://research-ai-backend-313190530690.asia-south2.run.app//chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
