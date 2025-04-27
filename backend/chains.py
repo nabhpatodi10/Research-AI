@@ -68,14 +68,14 @@ class Chains:
         try:
             __outlines = self.__model.with_structured_output(schema=structures.Outline, method="json_schema").batch(batch)
         except RateLimitError:
-            time.sleep(20)
+            time.sleep(30)
             __outlines = self.__model.with_structured_output(schema=structures.Outline, method="json_schema").batch(batch[len(batch)//2:])
-            time.sleep(20)
+            time.sleep(30)
             __outlines += self.__model.with_structured_output(schema=structures.Outline, method="json_schema").batch(batch[:len(batch)//2])
         except Exception:
-            time.sleep(40)
+            time.sleep(60)
             __outlines = self.__model.with_structured_output(schema=structures.Outline, method="json_schema").batch(batch[len(batch)//2:])
-            time.sleep(40)
+            time.sleep(60)
             __outlines += self.__model.with_structured_output(schema=structures.Outline, method="json_schema").batch(batch[:len(batch)//2])
 
         __stroutlines = ""
