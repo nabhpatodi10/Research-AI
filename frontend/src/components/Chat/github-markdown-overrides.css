@@ -4,6 +4,7 @@
     line-height: 1.5;
     color: #24292f;
     background-color: #f9fafb;
+    overflow-wrap: anywhere;
   }
 
   .markdown-body a {
@@ -32,9 +33,8 @@
     border-spacing: 0;
     border-collapse: collapse;
     display: block;
-    width: max-content;
-    max-width: 100%;
-    overflow: auto;
+    width: 100%;
+    overflow-x: auto;
   }
   
   .markdown-body th {
