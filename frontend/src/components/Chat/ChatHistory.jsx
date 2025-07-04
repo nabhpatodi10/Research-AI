@@ -3,7 +3,7 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 
-export default function ChatHistory({ onChatSelect }) {
+export default function ChatHistory({ onChatSelect, searchTerm = ''}) {
   const { currentUser } = useAuth();
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -48,13 +48,17 @@ export default function ChatHistory({ onChatSelect }) {
     return () => unsubscribe();
   }, [currentUser]);
 
+  const filtered = sessions.filter((s) =>
+    s.topic.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   if (loading) return <div className="text-gray-500 p-2">Loading history...</div>;
   if (error) return <div className="text-red-500 p-2">{error}</div>;
-  if (sessions.length === 0) return <div className="text-gray-500 p-2">No previous chats</div>;
+  if (filtered.length === 0) return <div className="text-gray-500 p-2">No previous chats</div>;
 
   return (
     <div className="space-y-2">
-      {sessions.map((session) => (
+      {filtered.map((session) => (
         <button
           key={session.id}
           onClick={() => onChatSelect(session.id)}

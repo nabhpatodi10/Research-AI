@@ -89,7 +89,7 @@ const parseContentString = (contentStr) => {
                 .replace(/True/g, 'true')
                 .replace(/False/g, 'false')
             );
-          } catch (e) {
+          } catch {
             // Keep as string if JSON parsing fails
             // Also format it for markdown if it's a string
             messageContent = formatTextForMarkdown(messageContent);
@@ -121,6 +121,43 @@ const parseContentString = (contentStr) => {
   }
 };
 
+const SidebarContent = ({
+  searchTerm,
+  setSearchTerm,
+  handleNewChat,
+  loadChat
+}) => (
+  <>
+    <div className="p-4 border-b border-gray-200">
+      <h1 className="text-xl font-bold text-blue-900">ResearchAI</h1>
+    </div>
+    <div className="p-4 pb-32 overflow-y-scroll no-scrollbar h-full">
+      <div className="mb-4">
+        <input
+          type="text"
+          placeholder="Search chats..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          className="w-full p-2 border border-gray-300 rounded text-sm"
+        />
+      </div>
+      <div className="space-y-2">
+        <button
+          onClick={handleNewChat}
+          className="w-full text-left p-2 hover:bg-gray-100 rounded text-sm font-medium hover:text-blue-900"
+        >
+          + New Chat
+        </button>
+        <ChatHistory onChatSelect={loadChat} searchTerm={searchTerm} />
+      </div>
+    </div>
+  </>
+);
+
 export default function ChatInterface() {
   const { currentUser } = useAuth();
   const [messages, setMessages] = useState([]);
@@ -131,11 +168,13 @@ export default function ChatInterface() {
   const [outputFormat, setOutputFormat] = useState('');
   const [outline, setOutline] = useState('');
   const [sessionId, setSessionId] = useState(null);
-  const [researchContent, setResearchContent] = useState(null);
+  // const [researchContent, setResearchContent] = useState(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [shareEmail, setShareEmail] = useState('');
   const [shareLoading, setShareLoading] = useState(false);
   const [shareError, setShareError] = useState('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => window.innerWidth >= 768);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     const saveChatSession = async () => {
@@ -162,7 +201,7 @@ export default function ChatInterface() {
     setOutline('');
     setMessages([]);
     setSessionId(null);
-    setResearchContent(null);
+    // setResearchContent(null);
   };
 
   const handleInitialSubmit = async (e) => {
@@ -187,7 +226,7 @@ export default function ChatInterface() {
       
       const data = await response.json();
       setSessionId(data.session_id);
-      setResearchContent(data.final_content);
+      // setResearchContent(data.final_content);
 
       setMessages(prev => [
         ...prev,
@@ -346,12 +385,17 @@ export default function ChatInterface() {
     }
     
     return (
-      <div className={`max-w-3/4 p-3 rounded-lg ${
-        msg.sender === 'user' ? 'bg-blue-900 text-white' :
-        msg.sender === 'ai' ? 'bg-white border border-gray-200' :
-        msg.sender === 'system-error' ? 'bg-red-100 border border-red-200 text-red-700' :
-        'bg-gray-100 border border-gray-200'
-      }`}>
+      <div
+        className={`max-w-full md:max-w-[75%] p-3 rounded-lg ${
+          msg.sender === 'user'
+            ? 'bg-blue-900 text-white'
+            : msg.sender === 'ai'
+            ? 'bg-white border border-gray-200'
+            : msg.sender === 'system-error'
+            ? 'bg-red-100 border border-red-200 text-red-700'
+            : 'bg-gray-100 border border-gray-200'
+        }`}
+      >
         {msg.sender === 'ai' ? (
           <MarkdownRenderer content={msg.text} />
         ) : (
@@ -405,7 +449,7 @@ export default function ChatInterface() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-100">
+    <div className="flex h-screen bg-gray-100 overflow-x-hidden">
 
       {/* Share Modal */}
       <Transition appear show={isShareModalOpen} as={Fragment}>
@@ -419,7 +463,7 @@ export default function ChatInterface() {
             leaveFrom="opacity-100"
             leaveTo="opacity-0"
           >
-            <div className="fixed inset-0 bg-black bg-opacity-25" />
+            <div className="fixed inset-0 bg-opacity-25" />
           </Transition.Child>
 
           <div className="fixed inset-0 overflow-y-auto">
@@ -480,37 +524,72 @@ export default function ChatInterface() {
         </Dialog>
       </Transition>
 
-      {/* Sidebar */}
-      <div className="w-4/25 bg-white border-r border-gray-200 pt-16">
-        <div className="p-4 border-b border-gray-200">
-          <h1 className="text-xl font-bold text-blue-900">ResearchAI</h1>
+      {/* Mobile Sidebar */}
+      <div className={`fixed inset-0 z-40 flex md:hidden ${isSidebarOpen ? '' : 'pointer-events-none'}`}>
+        <div
+          className={`fixed inset-0 bg-opacity-25 transition-opacity ${isSidebarOpen ? 'opacity-100' : 'opacity-0'}`}
+          onClick={() => setIsSidebarOpen(false)}
+        />
+        <div
+          className={`relative w-64 bg-white border-r border-gray-200 transform transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        >
+          <SidebarContent
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            handleNewChat={handleNewChat}
+            loadChat={loadChat}
+          />
         </div>
-        <div className="p-4 pb-32 overflow-y-scroll no-scrollbar h-full">
-          <div className="mb-4">
-            <input
-              type="text"
-              placeholder="Search chats..."
-              className="w-full p-2 border border-gray-300 rounded text-sm"
-            />
-          </div>
-          <div className="space-y-2">
-            <button 
-              onClick={handleNewChat}
-              className="w-full text-left p-2 hover:bg-gray-100 rounded text-sm font-medium hover:text-blue-900"
-            >
-              + New Chat
-            </button>
-            <ChatHistory onChatSelect={loadChat}/>
-          </div>
-        </div>
+      </div>
+
+      {/* Desktop Sidebar */}
+      <div
+        className={`hidden md:flex md:flex-col bg-white border-r border-gray-200 pt-16 transition-all duration-300 ${isSidebarOpen ? 'md:w-64' : 'md:w-0 md:overflow-hidden'}`}
+      >
+        {isSidebarOpen && (
+          <SidebarContent
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            handleNewChat={handleNewChat}
+            loadChat={loadChat}
+          />
+        )}
       </div>
       
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col w-21/25 pt-16">
-        <div className="p-4 border-b border-gray-200 bg-white">
-          <h2 className="text-lg font-semibold text-blue-900">
-            {sessionId ? `Research: ${topic}` : 'New Research Session'}
-          </h2>
+      <div className="flex-1 flex flex-col pt-16">
+        <div className="p-4 border-b border-gray-200 bg-white flex items-center justify-between">
+          <div className="flex items-center">
+            <button
+              className="md:hidden mr-2"
+              onClick={() => setIsSidebarOpen(true)}
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path>
+              </svg>
+            </button>
+            <button
+              className="hidden md:block mr-2"
+              onClick={() => setIsSidebarOpen((v) => !v)}
+            >
+              <svg
+                className="w-6 h-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                {isSidebarOpen ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 12L6 6V18Z" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 6h12M6 12h12M6 18h12" />
+                )}
+              </svg>
+            </button>
+            <h2 className="text-lg font-semibold text-blue-900">
+              {sessionId ? `Research: ${topic}` : 'New Research Session'}
+            </h2>
+          </div>
           {sessionId && (
             <button
               onClick={handleShareClick}
