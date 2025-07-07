@@ -16,6 +16,10 @@
     padding: 16px;
     overflow: auto;
   }
+
+  .markdown-body code.hljs {
+    white-space: pre-wrap;
+  }
   
   .markdown-body code:not(.hljs) {
     color: #f9fafb;
