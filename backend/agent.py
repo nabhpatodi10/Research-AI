@@ -2,8 +2,9 @@ import asyncio
 from langchain_core.messages import ToolMessage, SystemMessage, AIMessage, HumanMessage, BaseMessage
 from langgraph.graph import StateGraph, END
 from langchain.chat_models import BaseChatModel
+from playwright.async_api import Browser
 
-from structures import agent_type, AgentState
+from structures import AgentState
 from database import Database
 from tools import Tools
 
@@ -12,9 +13,9 @@ async def get_chat_history(database: Database, session_id: str, model: BaseChatM
     chat_history = []
     if len(previous_messages) > 0:
         conversation_turns = 7
-        for i in previous_messages[-1::-1]:
+        for _, i in enumerate(previous_messages[-1::-1]):
             if conversation_turns <= 0:
-                break
+                break # add chat history summarization here
             if ((hasattr(model, "model") and "gpt" not in model.model) or (hasattr(model, "model_name") and "gpt" not in model.model_name)) and isinstance(i, AIMessage):
                 if i.response_metadata is not None and "gpt" in i.response_metadata.get("model_name", ""):
                     blocks = [block for block in i.content_blocks if block["type"] != "reasoning"]
@@ -34,8 +35,7 @@ class Agent:
         session_id: str,
         database: Database,
         model: BaseChatModel,
-        agent_type: agent_type,
-        browser
+        browser: Browser
     ):
         self.__system_prompt = None
         __graph = StateGraph(AgentState)
@@ -53,18 +53,16 @@ class Agent:
         tool_list = Tools(session_id, database, browser).return_tools()
         self.__tools = {t.name: t for t in tool_list}
         self.__model = model.bind_tools(tool_list)
-        self.__agent_type = agent_type
         self.__session_id = session_id
         self.__old_messages = []
 
     async def __call_llm(self, state: AgentState):
         try:
-            if len(state["messages"]) <= 1 and self.__agent_type == "chat_agent":
+            if len(state["messages"]) <= 1:
                 self.__system_prompt = [SystemMessage(content="")]
                 self.__old_messages = await get_chat_history(self.__database, self.__session_id, self.__model)
-            messages = self.__system_prompt + self.__old_messages + state["messages"] if self.__agent_type == "chat_agent" else self.__system_prompt + state["messages"]
+            messages = self.__system_prompt + self.__old_messages + state["messages"]
             message = await self.__model.ainvoke(messages)
-            message.name = self.__agent_type
             return {"messages" : [message]}
         except Exception as e:
             print(e)
@@ -97,6 +95,5 @@ class Agent:
         if len(tool_calls) > 0:
             return True
         else:
-            if self.__agent_type == "chat_agent":
-                await self.__database.add_messages(self.__session_id, state["messages"])
+            await self.__database.add_messages(self.__session_id, state["messages"])
             return False
