@@ -2,6 +2,20 @@ from bs4 import BeautifulSoup
 from playwright.async_api import Browser, TimeoutError as PlaywrightTimeoutError
 from playwright_stealth import Stealth
 from langchain_core.documents import Document
+import asyncio
+
+def _extract_text_and_title(html: str, url: str, provided_title: str | None, page_title: str | None) -> tuple[str, str]:
+    soup = BeautifulSoup(html, "lxml")
+    text = soup.get_text(separator="\n", strip=True)
+
+    resolved_title = (
+        provided_title
+        or page_title
+        or (soup.title.string.strip() if soup.title and soup.title.string else None)
+        or url
+    )
+
+    return resolved_title, text
 
 class Scrape:
     
@@ -46,14 +60,13 @@ class Scrape:
                 except Exception:
                     pass
 
-                soup = BeautifulSoup(await page.content(), "lxml")
-                text = soup.get_text(separator="\n", strip=True)
-
-                resolved_title = (
-                    title
-                    or page_title
-                    or (soup.title.string.strip() if soup.title and soup.title.string else None)
-                    or url
+                html = await page.content()
+                resolved_title, text = await asyncio.to_thread(
+                    _extract_text_and_title,
+                    html,
+                    url,
+                    title,
+                    page_title,
                 )
 
                 if not text or len(text) < 500:
