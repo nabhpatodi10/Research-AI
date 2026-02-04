@@ -18,6 +18,8 @@ class Tools:
         """Web Search tool to access documents from the web based on the given search query"""
         __urls = await self.__search.search(query, 5)
         documents = await asyncio.gather(*[self.__scrape.scrape(url, title) for url, title in __urls.items()])
+        documents = [doc for doc in documents if doc is not None and doc.page_content is not None and doc.page_content.strip() != ""]
+        await self.__database.add_data(self.__session_id, documents)
         return "\n----------------\n".join([f"Title: {doc.metadata.get('title', 'None')}\nContent:{doc.page_content}\nSource: {doc.metadata.get('source', 'None')}" for doc in documents])
     
     async def vector_search_tool(self, query: str) -> str:
