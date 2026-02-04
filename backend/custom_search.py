@@ -1,17 +1,27 @@
-import os, httpx
-from typing import Any
+import os
+from typing import Any, ClassVar
+
+import httpx
 
 class CustomSearch:
+    _client: ClassVar[httpx.AsyncClient | None] = None
+
     def __init__(self):
         self.__api_key = os.getenv("GEMINI_API_KEY")
         self.__search_engine_id = os.getenv("SEARCH_ENGINE_ID")
         self.__base_url = "https://www.googleapis.com/customsearch/v1"
 
-        timeout_s = 20.0
-        self.__client = httpx.AsyncClient(timeout=httpx.Timeout(timeout_s))
+        if CustomSearch._client is None:
+            CustomSearch._client = httpx.AsyncClient(timeout=httpx.Timeout(20.0))
 
-    async def aclose(self) -> None:
-        await self.__client.aclose()
+        self.__client = CustomSearch._client
+
+    @classmethod
+    async def aclose(cls) -> None:
+        if cls._client is None:
+            return
+        await cls._client.aclose()
+        cls._client = None
     
     async def search(self, query: str, num: int) -> dict[str, str]:
         try:
