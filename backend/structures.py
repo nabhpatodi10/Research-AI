@@ -1,11 +1,11 @@
 from typing import List, Optional, TypedDict, Annotated
 from pydantic import BaseModel, Field
 import operator
-from langchain_core.messages import AnyMessage
+from langchain.messages import AnyMessage
 
 class OutlineSubsection(BaseModel):
     subsection_title: str = Field(title="Title of the subsection")
-    description: str = Field(title="Content of the subsection")
+    description: str = Field(title="Description of the content for the subsection")
 
     @property
     def as_str(self) -> str:
@@ -14,26 +14,23 @@ class OutlineSubsection(BaseModel):
 
 class OutlineSection(BaseModel):
     section_title: str = Field(title="Title of the section")
-    description: str = Field(title="Content of the section")
+    description: str = Field(title="Description of the content for the section")
     subsections: Optional[List[OutlineSubsection]] = Field(
         default=None,
-        title="Titles and descriptions for each subsection of the Research page.",
+        title="Titles and descriptions for each subsection of the Research Document.",
     )
 
     @property
     def as_str(self) -> str:
-        subsections = "\n\n".join(
-            f"### {subsection.subsection_title}\n\n{subsection.description}"
-            for subsection in self.subsections or []
-        )
+        subsections = "\n\n".join(subsection.as_str for subsection in self.subsections) if self.subsections else ""
         return f"## {self.section_title}\n\n{self.description}\n\n{subsections}".strip()
 
 
 class Outline(BaseModel):
-    page_title: str = Field(title="Title of the Research page")
+    page_title: str = Field(title="Title of the Research Document")
     sections: List[OutlineSection] = Field(
         default_factory=list,
-        title="Titles and descriptions for each section of the Research page.",
+        title="Titles and descriptions for each section of the Research Document.",
     )
 
     @property
@@ -44,9 +41,7 @@ class Outline(BaseModel):
 class Related_Topics(BaseModel):
     topics: List[str] = Field(
         default_factory=list,
-        title="List of related topics.",
-        min_length=5,
-        max_length=10
+        title="List of related topics."
     )
 
     @property
