@@ -16,16 +16,34 @@ class Tools:
 
     async def web_search_tool(self, query: str) -> str:
         """Web Search tool to access documents from the web based on the given search query"""
-        __urls = await self.__search.search(query, 5)
-        documents = await asyncio.gather(*[self.__scrape.scrape(url, title) for url, title in __urls.items()])
-        documents = [doc for doc in documents if doc is not None and doc.page_content is not None and doc.page_content.strip() != ""]
-        await self.__database.add_data(self.__session_id, documents)
-        return "\n----------------\n".join([f"Title: {doc.metadata.get('title', 'None')}\nContent:{doc.page_content}\nSource: {doc.metadata.get('source', 'None')}" for doc in documents])
+        try:
+            __urls = await self.__search.search(query, 5)
+            documents = await asyncio.gather(*[self.__scrape.scrape(url, title) for url, title in __urls.items()])
+            documents = [doc for doc in documents if doc is not None and doc.page_content is not None and doc.page_content.strip() != ""]
+            await self.__database.add_data(self.__session_id, documents)
+            return "\n----------------\n".join([f"Title: {doc.metadata.get('title', 'None')}\nContent:{doc.page_content}\nSource: {doc.metadata.get('source', 'None')}" for doc in documents])
+        except Exception as e:
+            return f"An error occured: {str(e)}"
+    
+    async def url_search_tool(self, url: str) -> str:
+        """URL Search tool to access documents from the web based on the given URL"""
+        try:
+            document = await self.__scrape.scrape(url)
+            if document is not None and document.page_content is not None and document.page_content.strip() != "":
+                await self.__database.add_data(self.__session_id, [document])
+                return f"Title: {document.metadata.get('title', 'None')}\nContent:{document.page_content}\nSource: {document.metadata.get('source', 'None')}"
+            else:
+                return "No content found at the provided URL."
+        except Exception as e:
+            return f"An error occured: {str(e)}"
     
     async def vector_search_tool(self, query: str) -> str:
         """Vector Store Search tool to access documents from the vector store based on the given search query"""
-        documents = await self.__database.vector_search(session_id=self.__session_id, query=query)
-        return "\n----------------\n".join([f"Title: {doc.metadata.get('title', 'None')}\nContent:{doc.page_content}\nSource: {doc.metadata.get('source', 'None')}" for doc in documents])
+        try:
+            documents = await self.__database.vector_search(session_id=self.__session_id, query=query)
+            return "\n----------------\n".join([f"Title: {doc.metadata.get('title', 'None')}\nContent:{doc.page_content}\nSource: {doc.metadata.get('source', 'None')}" for doc in documents])
+        except Exception as e:
+            return f"An error occured: {str(e)}"
     
     def return_tools(self) -> list[BaseTool]:
-        return [tool(self.vector_search_tool), tool(self.web_search_tool)]
+        return [tool(self.vector_search_tool), tool(self.web_search_tool), tool(self.url_search_tool)]
