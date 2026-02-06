@@ -1,99 +1,168 @@
 import asyncio
-from langchain_core.messages import ToolMessage, SystemMessage, AIMessage, HumanMessage, BaseMessage
-from langgraph.graph import StateGraph, END
+import operator
+from typing import Annotated, Any, TypedDict
+
+from langchain.agents import create_agent
+from langchain.agents.middleware import AgentMiddleware
 from langchain.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage, SystemMessage
 from playwright.async_api import Browser
 
-from structures import AgentState
 from database import Database
 from tools import Tools
 
+
+class AgentExecutionState(TypedDict):
+    messages: Annotated[list[BaseMessage], operator.add]
+    chat_history: list[BaseMessage]
+
+
+def _is_non_gpt_model(model: BaseChatModel) -> bool:
+    model_attr = str(getattr(model, "model", "") or "").lower()
+    model_name_attr = str(getattr(model, "model_name", "") or "").lower()
+    has_model_id = bool(model_attr or model_name_attr)
+    return has_model_id and ("gpt" not in model_attr) and ("gpt" not in model_name_attr)
+
+
+def _strip_reasoning_blocks_if_needed(message: BaseMessage, model: BaseChatModel) -> BaseMessage:
+    if not isinstance(message, AIMessage):
+        return message
+    if not _is_non_gpt_model(model):
+        return message
+
+    response_metadata = getattr(message, "response_metadata", None) or {}
+    source_model_name = str(response_metadata.get("model_name", "") or "").lower()
+    if "gpt" not in source_model_name:
+        return message
+
+    content_blocks = getattr(message, "content_blocks", None)
+    if not isinstance(content_blocks, list):
+        return message
+
+    blocks = [
+        block
+        for block in content_blocks
+        if not (isinstance(block, dict) and block.get("type") == "reasoning")
+    ]
+    try:
+        return AIMessage(
+            content=message.content,
+            content_blocks=blocks,
+            name=message.name,
+            id=message.id,
+            tool_calls=message.tool_calls,
+            response_metadata=message.response_metadata,
+            additional_kwargs=message.additional_kwargs,
+        )
+    except Exception:
+        return message
+
+
 async def get_chat_history(database: Database, session_id: str, model: BaseChatModel) -> list[BaseMessage]:
     previous_messages = await database.get_messages(session_id)
-    chat_history = []
-    if len(previous_messages) > 0:
-        conversation_turns = 7
-        for _, i in enumerate(previous_messages[-1::-1]):
-            if conversation_turns <= 0:
-                break # add chat history summarization here
-            if ((hasattr(model, "model") and "gpt" not in model.model) or (hasattr(model, "model_name") and "gpt" not in model.model_name)) and isinstance(i, AIMessage):
-                if i.response_metadata is not None and "gpt" in i.response_metadata.get("model_name", ""):
-                    blocks = [block for block in i.content_blocks if block["type"] != "reasoning"]
-                    new_message = AIMessage(content=i.content, content_blocks=blocks, name=i.name, id=i.id, tool_calls=i.tool_calls, response_metadata=i.response_metadata, additional_kwargs=i.additional_kwargs)
-                    i = new_message
-            if isinstance(i, HumanMessage):
-                chat_history.insert(0, i)
-                conversation_turns -= 1
-            elif isinstance(i, AIMessage) or (isinstance(i, ToolMessage)):
-                chat_history.insert(0, i)
+    chat_history: list[BaseMessage] = []
+    if not previous_messages:
+        return chat_history
+
+    conversation_turns = 7
+    for idx, message in enumerate(reversed(previous_messages), start=1):
+        if conversation_turns <= 0:
+            break
+
+        message = _strip_reasoning_blocks_if_needed(message, model)
+        if isinstance(message, HumanMessage):
+            chat_history.insert(0, message)
+            conversation_turns -= 1
+        elif isinstance(message, (AIMessage, ToolMessage)):
+            chat_history.insert(0, message)
+
+        # Yield periodically when scanning large histories to keep loop responsive.
+        if idx % 100 == 0:
+            await asyncio.sleep(0)
     return chat_history
 
-class Agent:
 
+class ChatHistoryMiddleware(AgentMiddleware[AgentExecutionState, Any]):
+    def __init__(self, database: Database, session_id: str, model: BaseChatModel):
+        self._database = database
+        self._session_id = session_id
+        self._model = model
+
+    async def abefore_agent(self, state: AgentExecutionState, runtime: Any) -> dict[str, Any]:
+        chat_history = await get_chat_history(self._database, self._session_id, self._model)
+        return {"chat_history": chat_history}
+
+    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
+        state = request.state or {}
+        chat_history = state.get("chat_history", [])
+        if chat_history:
+            request = request.override(messages=[*chat_history, *request.messages])
+        return await handler(request)
+
+
+class UnknownToolFallbackMiddleware(AgentMiddleware[AgentExecutionState, Any]):
+    async def awrap_tool_call(self, request: Any, handler: Any) -> ToolMessage | Any:
+        if request.tool is not None:
+            return await handler(request)
+
+        tool_call = request.tool_call or {}
+        tool_call_id = ""
+        tool_name = None
+        if isinstance(tool_call, dict):
+            tool_call_id = str(tool_call.get("id", "") or "")
+            tool_name = tool_call.get("name")
+        else:
+            tool_call_id = str(getattr(tool_call, "id", "") or "")
+            tool_name = getattr(tool_call, "name", None)
+
+        return ToolMessage(
+            tool_call_id=tool_call_id,
+            name=tool_name,
+            content="bad tool name, retry",
+        )
+
+
+class PersistMessagesMiddleware(AgentMiddleware[AgentExecutionState, Any]):
+    def __init__(self, database: Database, session_id: str):
+        self._database = database
+        self._session_id = session_id
+
+    async def aafter_agent(self, state: AgentExecutionState, runtime: Any) -> None:
+        messages = state.get("messages", [])
+        if messages:
+            await self._database.add_messages(self._session_id, messages)
+
+
+def _normalize_system_prompt(
+    system_prompt: SystemMessage | list[SystemMessage] | str | None,
+) -> SystemMessage | str | None:
+    if isinstance(system_prompt, list):
+        if not system_prompt:
+            return None
+        if len(system_prompt) == 1:
+            return system_prompt[0]
+        return "\n\n".join(str(message.content) for message in system_prompt)
+    return system_prompt
+
+
+class Agent:
     def __init__(
         self,
         session_id: str,
         database: Database,
         model: BaseChatModel,
-        browser: Browser
+        system_prompt: SystemMessage | list[SystemMessage] | str | None,
+        browser: Browser,
     ):
-        self.__system_prompt = None
-        __graph = StateGraph(AgentState)
-        __graph.add_node("llm", self.__call_llm)
-        __graph.add_node("action", self.__take_action)
-        __graph.add_conditional_edges(
-            "llm",
-            self.__check_action,
-            {True : "action", False : END}
-        )
-        __graph.add_edge("action", "llm")
-        __graph.set_entry_point("llm")
-        self.graph = __graph.compile()
-        self.__database = database
         tool_list = Tools(session_id, database, browser).return_tools()
-        self.__tools = {t.name: t for t in tool_list}
-        self.__model = model.bind_tools(tool_list)
-        self.__session_id = session_id
-        self.__old_messages = []
-
-    async def __call_llm(self, state: AgentState):
-        try:
-            if len(state["messages"]) <= 1:
-                self.__system_prompt = [SystemMessage(content="")]
-                self.__old_messages = await get_chat_history(self.__database, self.__session_id, self.__model)
-            messages = self.__system_prompt + self.__old_messages + state["messages"]
-            message = await self.__model.ainvoke(messages)
-            return {"messages" : [message]}
-        except Exception as e:
-            print(e)
-            raise e
-
-    async def __take_action(self, state: AgentState):
-        tool_calls = state["messages"][-1].tool_calls
-        results: list[ToolMessage] = []
-        __chains = []
-        for t in tool_calls:
-            print(f"Calling: {t}")
-            result = "No output from the tool."
-            if not t["name"] in self.__tools:
-                result = "bad tool name, retry"
-            else:
-                __chains.append(self.__tools[t["name"]].ainvoke(t["args"]))
-            tool_message = ToolMessage(tool_call_id = t["id"], name = t["name"], content = str(result))
-            results.append(tool_message)
-        __outputs = await asyncio.gather(*__chains)
-        output_index = 0
-        for tool_message in results:
-            if tool_message.content == "No output from the tool." and output_index < len(__outputs):
-                tool_message.content = str(__outputs[output_index])
-                output_index += 1
-        print("Back to the model!")
-        return {"messages" : results}
-
-    async def __check_action(self, state: AgentState):
-        tool_calls = getattr(state["messages"][-1], "tool_calls", None) or []
-        if len(tool_calls) > 0:
-            return True
-        else:
-            await self.__database.add_messages(self.__session_id, state["messages"])
-            return False
+        self.graph = create_agent(
+            model=model,
+            tools=tool_list,
+            system_prompt=_normalize_system_prompt(system_prompt),
+            middleware=[
+                ChatHistoryMiddleware(database, session_id, model),
+                UnknownToolFallbackMiddleware(),
+                PersistMessagesMiddleware(database, session_id),
+            ],
+            state_schema=AgentExecutionState,
+        )
