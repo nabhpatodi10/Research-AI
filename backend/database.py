@@ -15,7 +15,7 @@ class Database:
 
     def __init__(self):
         self.__firestore_client = Client(project=os.getenv("GOOGLE_PROJECT_ID"))
-        self.__embeddingModel = GoogleGenerativeAIEmbeddings(model_name="text-embedding-005", vertexai=True)
+        self.__embeddingModel = GoogleGenerativeAIEmbeddings(model="text-embedding-005", vertexai=True)
         self.__splitter = RecursiveCharacterTextSplitter(chunk_size=6500, chunk_overlap=200)
 
     async def chat(self, session_id: str) -> FirestoreChatMessageHistory:
