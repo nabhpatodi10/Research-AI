@@ -1,14 +1,14 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-import uuid, asyncio, sys, uvicorn
+import uuid_utils, asyncio, sys, uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from playwright.async_api import async_playwright
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from nodes import Nodes
 from agent import Agent
@@ -27,12 +27,9 @@ async def lifespan(app: FastAPI):
     # Startup: initialize shared Custom Search HTTP client
     app.state.custom_search = CustomSearch()
     app.state.database = Database()
-    app.state.chat_model = ChatOpenAI(
-        model="gpt-5-mini",
-        reasoning={"effort": "medium"},
-        verbosity="high",
-        use_responses_api=True,
-        max_retries=3
+    app.state.chat_model = ChatGoogleGenerativeAI(
+        model = "gemini-3-flash-preview",
+        thinking_level="minimal"
     )
     yield
     # Shutdown: Close browser and stop Playwright
@@ -84,7 +81,7 @@ def read_root():
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
-    session_id = request.session_id or str(uuid.uuid4())
+    session_id = request.session_id or str(uuid_utils.uuid7())
     try:
         # Get system messages using updated nodes (returns a list of SystemMessage)
         system_prompt = Nodes().chat_agent()
@@ -102,6 +99,9 @@ async def chat_endpoint(request: ChatRequest):
         )
         # Invoke the agent's state graph asynchronously
         result = await chat_agent.graph.ainvoke(state)
+        final_document = result.get("final_document")
+        if final_document:
+            return ChatResponse(response=str(final_document))
         final_messages = result.get("messages", [])
         if not final_messages:
             raise Exception("No response from chat agent")
