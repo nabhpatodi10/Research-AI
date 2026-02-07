@@ -1,131 +1,108 @@
-import { useState, useEffect, Fragment } from 'react';
-import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { useState, useEffect, Fragment, useRef } from 'react';
+import { doc, getDoc, setDoc, updateDoc, deleteField, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import ChatHistory from './ChatHistory';
 import MarkdownRenderer from './MarkdownRenderer';
 import { Dialog, Transition } from '@headlessui/react';
 
-// Helper function to parse Python-style strings to JSON
-const parseContentString = (contentStr) => {
-  try {
-    // Handle invalid inputs
-    if (!contentStr || typeof contentStr !== 'string') {
-      console.error("Invalid content string:", contentStr);
-      return ['Invalid Content', 'Could not parse message'];
-    }
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
-    // Escape function to properly format text for markdown rendering
-    const formatTextForMarkdown = (text) => {
-      if (typeof text !== 'string') return text;
-      
-      // Ensure literal \n sequences are converted to actual newlines first
-      const withProperNewlines = text.replace(/\\n/g, '\n');
-      
-      // Then convert single newlines to markdown line breaks (adding two spaces before each newline)
-      return withProperNewlines.replace(/\n/g, '  \n');
-    };
+const createClientSessionId = () => {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return uuid;
+  return `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
 
-    // Check if this is a Python list format: ['type', 'content']
-    if (contentStr.startsWith('[') && contentStr.endsWith(']')) {
-      // Extract the content between the outer brackets
-      const innerContent = contentStr.slice(1, -1);
-      
-      // Find the first comma that's not inside nested quotes or brackets
-      let inQuote = false;
-      let quoteChar = null;
-      let bracketDepth = 0;
-      let commaIndex = -1;
-      
-      for (let i = 0; i < innerContent.length; i++) {
-        const char = innerContent[i];
-        
-        // Handle quotes (respecting escape sequences)
-        if ((char === "'" || char === '"') && (i === 0 || innerContent[i-1] !== '\\')) {
-          if (!inQuote) {
-            inQuote = true;
-            quoteChar = char;
-          } else if (char === quoteChar) {
-            inQuote = false;
-          }
-        } 
-        // Only track brackets if not inside a quoted string
-        else if (!inQuote) {
-          if (char === '[') bracketDepth++;
-          else if (char === ']') bracketDepth--;
-          // Find the comma that separates the first and second elements
-          else if (char === ',' && bracketDepth === 0) {
-            commaIndex = i;
-            break;
-          }
-        }
-      }
-      
-      if (commaIndex !== -1) {
-        // Extract the message type (first element)
-        let messageType = innerContent.substring(0, commaIndex).trim();
-        // Remove surrounding quotes if present
-        messageType = messageType.replace(/^['"](.*)['"]$/, '$1');
-        
-        // Extract the message content (second element)
-        let messageContent = innerContent.substring(commaIndex + 1).trim();
-        
-        // If message content starts and ends with quotes, it's a string
-        if ((messageContent.startsWith("'") && messageContent.endsWith("'")) || 
-            (messageContent.startsWith('"') && messageContent.endsWith('"'))) {
-          // Extract the string content (remove surrounding quotes)
-          messageContent = messageContent.slice(1, -1);
-          
-          // Format the string content for markdown rendering
-          messageContent = formatTextForMarkdown(messageContent);
-        } 
-        // Otherwise try to parse it as JSON (for objects, etc.)
-        else {
-          try {
-            messageContent = JSON.parse(
-              messageContent
-                .replace(/'/g, '"')
-                .replace(/None/g, 'null')
-                .replace(/True/g, 'true')
-                .replace(/False/g, 'false')
-            );
-          } catch {
-            // Keep as string if JSON parsing fails
-            // Also format it for markdown if it's a string
-            messageContent = formatTextForMarkdown(messageContent);
-          }
-        }
-        
-        return [messageType, messageContent];
-      }
-    }
-    
-    // Fallback to original algorithm
-    const jsonString = contentStr
-      .replace(/'/g, '"')
-      .replace(/None/g, 'null')
-      .replace(/True/g, 'true')
-      .replace(/False/g, 'false');
+const deriveSessionTitle = (text) => {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return 'Untitled Session';
+  const maxLength = 72;
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
+};
 
-    let parsed = JSON.parse(jsonString);
-    
-    // Also format any string content in the parsed result
-    if (Array.isArray(parsed) && parsed.length === 2 && typeof parsed[1] === 'string') {
-      parsed[1] = formatTextForMarkdown(parsed[1]);
-    }
-    
-    return parsed;
-  } catch (error) {
-    console.error("Error parsing content:", error, contentStr);
-    return ['Invalid Content', 'Could not parse message'];
+const extractTextFromContent = (content) => {
+  if (typeof content === 'string') {
+    return content;
   }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (!item || typeof item !== 'object') return '';
+        if (item.type === 'text' && typeof item.text === 'string') return item.text;
+        return extractTextFromContent(item);
+      })
+      .filter((text) => typeof text === 'string' && text.trim())
+      .join('\n');
+  }
+
+  if (!content || typeof content !== 'object') {
+    return '';
+  }
+
+  if (typeof content.text === 'string') {
+    return content.text;
+  }
+
+  if (typeof content.content === 'string') {
+    return content.content;
+  }
+
+  if (Array.isArray(content.content)) {
+    return extractTextFromContent(content.content);
+  }
+
+  if (Array.isArray(content.blocks)) {
+    return extractTextFromContent(content.blocks);
+  }
+
+  try {
+    return JSON.stringify(content, null, 2);
+  } catch {
+    return '';
+  }
+};
+
+const normalizeStoredMessage = (rawMessage, index) => {
+  let parsedMessage = rawMessage;
+  if (typeof rawMessage === 'string') {
+    const trimmed = rawMessage.trim();
+    if (!trimmed) return null;
+    try {
+      parsedMessage = JSON.parse(trimmed);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!parsedMessage || typeof parsedMessage !== 'object') return null;
+
+  const typeToken = String(parsedMessage.type || parsedMessage.role || '').toLowerCase();
+  const isHuman = typeToken.includes('human') || typeToken === 'user';
+  const isAi = typeToken.includes('ai') || typeToken.includes('assistant');
+  if (!isHuman && !isAi) return null;
+
+  const content = parsedMessage.content ?? parsedMessage.data?.content;
+  const text = extractTextFromContent(content).trim();
+  if (!text) return null;
+
+  return {
+    id: `msg-${index}`,
+    text,
+    sender: isHuman ? 'user' : 'ai',
+  };
 };
 
 const SidebarContent = ({
   searchTerm,
   setSearchTerm,
   handleNewChat,
-  loadChat
+  handleDeleteChat,
+  handleRenameChat,
+  handleShareChat,
+  loadChat,
 }) => (
   <>
     <div className="p-4 border-b border-gray-200">
@@ -152,7 +129,13 @@ const SidebarContent = ({
         >
           + New Chat
         </button>
-        <ChatHistory onChatSelect={loadChat} searchTerm={searchTerm} />
+        <ChatHistory
+          onChatSelect={loadChat}
+          onDeleteChat={handleDeleteChat}
+          onRenameChat={handleRenameChat}
+          onShareChat={handleShareChat}
+          searchTerm={searchTerm}
+        />
       </div>
     </div>
   </>
@@ -163,227 +146,275 @@ export default function ChatInterface() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isNewChat, setIsNewChat] = useState(true);
-  const [topic, setTopic] = useState('');
-  const [outputFormat, setOutputFormat] = useState('');
-  const [outline, setOutline] = useState('');
+  const [isGeneratingResponse, setIsGeneratingResponse] = useState(false);
+  const [sessionTitle, setSessionTitle] = useState('');
   const [sessionId, setSessionId] = useState(null);
-  // const [researchContent, setResearchContent] = useState(null);
+  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
+  const [renameSessionId, setRenameSessionId] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
+  const [renameError, setRenameError] = useState('');
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [shareSessionId, setShareSessionId] = useState(null);
+  const [shareSessionTitle, setShareSessionTitle] = useState('');
   const [shareEmail, setShareEmail] = useState('');
   const [shareLoading, setShareLoading] = useState(false);
   const [shareError, setShareError] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [searchTerm, setSearchTerm] = useState('');
+  const sessionIdRef = useRef(null);
+  const sessionTitleRef = useRef('');
+  const isGeneratingRef = useRef(false);
 
   useEffect(() => {
     const saveChatSession = async () => {
-      if (!currentUser || !sessionId || !topic) return;
-      
+      if (!currentUser || !sessionId) return;
+
       const userChatsRef = doc(db, 'user_chats', currentUser.uid);
       await setDoc(userChatsRef, {
         sessions: {
           [sessionId]: {
-            topic,
-            createdAt: new Date()
-          }
-        }
+            topic: sessionTitle || 'Untitled Session',
+            createdAt: new Date(),
+          },
+        },
       }, { merge: true });
     };
 
     saveChatSession();
-  }, [sessionId, currentUser, topic]);
+  }, [sessionId, currentUser, sessionTitle]);
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  useEffect(() => {
+    sessionTitleRef.current = sessionTitle;
+  }, [sessionTitle]);
 
   const handleNewChat = () => {
-    setIsNewChat(true);
-    setTopic('');
-    setOutputFormat('');
-    setOutline('');
     setMessages([]);
+    setInput('');
+    setSessionTitle('');
     setSessionId(null);
-    // setResearchContent(null);
+    sessionIdRef.current = null;
+    sessionTitleRef.current = '';
+    setIsRenameModalOpen(false);
+    setRenameSessionId(null);
+    setRenameValue('');
+    setRenameError('');
+    setShareError('');
   };
 
-  const handleInitialSubmit = async (e) => {
-    e.preventDefault();
-    if (!topic.trim() || !outputFormat.trim()) return;
+  const handleRenameChat = (targetSessionId, currentTitle = 'Untitled Session') => {
+    if (!targetSessionId) return;
+    setRenameSessionId(targetSessionId);
+    setRenameValue(currentTitle);
+    setRenameError('');
+    setIsRenameModalOpen(true);
+  };
 
-    setLoading(true);
+  const closeRenameModal = () => {
+    setIsRenameModalOpen(false);
+    setRenameSessionId(null);
+    setRenameValue('');
+    setRenameError('');
+  };
+
+  const handleRenameSubmit = async (e) => {
+    e.preventDefault();
+    if (!currentUser || !renameSessionId) return;
+
+    const nextTitle = renameValue.trim();
+    if (!nextTitle) {
+      setRenameError('Chat name is required');
+      return;
+    }
+
+    setRenameLoading(true);
+    setRenameError('');
     try {
-      const response = await fetch('https://research-ai-backend-313190530690.asia-south1.run.app/research', {
+      const userChatsRef = doc(db, 'user_chats', currentUser.uid);
+      const userChatsSnap = await getDoc(userChatsRef);
+      const sessions = userChatsSnap.exists() ? (userChatsSnap.data().sessions || {}) : {};
+      const existing = sessions[renameSessionId] || {};
+
+      await setDoc(userChatsRef, {
+        sessions: {
+          [renameSessionId]: {
+            ...existing,
+            topic: nextTitle,
+            createdAt: existing.createdAt || new Date(),
+          },
+        },
+      }, { merge: true });
+
+      if (renameSessionId === sessionId) {
+        sessionTitleRef.current = nextTitle;
+        setSessionTitle(nextTitle);
+      }
+      closeRenameModal();
+    } catch (error) {
+      console.error('Error renaming chat:', error);
+      setRenameError(error.message || 'Failed to rename chat');
+    } finally {
+      setRenameLoading(false);
+    }
+  };
+
+  const handleDeleteChat = async (targetSessionId, targetTitle = 'Untitled Session') => {
+    if (!currentUser || !targetSessionId) return;
+
+    const shouldDelete = window.confirm(`Delete chat "${targetTitle}"?`);
+    if (!shouldDelete) return;
+
+    try {
+      const userChatsRef = doc(db, 'user_chats', currentUser.uid);
+      await updateDoc(userChatsRef, {
+        [`sessions.${targetSessionId}`]: deleteField(),
+      });
+
+      if (targetSessionId === sessionId) {
+        handleNewChat();
+      }
+    } catch (error) {
+      console.error('Error deleting chat:', error);
+    }
+  };
+
+  const handleShareChat = (targetSessionId, targetTitle = 'Untitled Session') => {
+    if (!targetSessionId) return;
+    setShareSessionId(targetSessionId);
+    setShareSessionTitle(targetTitle);
+    setShareError('');
+    setIsShareModalOpen(true);
+  };
+
+  const closeShareModal = () => {
+    setIsShareModalOpen(false);
+    setShareError('');
+    setShareEmail('');
+    setShareSessionId(null);
+    setShareSessionTitle('');
+  };
+
+  const handleSend = async (e) => {
+    e.preventDefault();
+    const messageText = input.trim();
+    if (!messageText || loading || isGeneratingRef.current) return;
+
+    isGeneratingRef.current = true;
+    setIsGeneratingResponse(true);
+
+    let activeSessionId = sessionIdRef.current;
+    if (!activeSessionId) {
+      activeSessionId = createClientSessionId();
+      sessionIdRef.current = activeSessionId;
+      setSessionId(activeSessionId);
+    }
+
+    let nextSessionTitle = sessionTitleRef.current;
+    if (!nextSessionTitle) {
+      nextSessionTitle = deriveSessionTitle(messageText);
+      sessionTitleRef.current = nextSessionTitle;
+      setSessionTitle(nextSessionTitle);
+    }
+
+    const pendingMessageId = `pending-${createClientSessionId()}`;
+    setMessages((prev) => [
+      ...prev,
+      { id: `user-${createClientSessionId()}`, text: messageText, sender: 'user' },
+      { id: pendingMessageId, text: '', sender: 'ai', status: 'pending' },
+    ]);
+    setInput('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          topic,
-          output_format: outputFormat,
-          outline: outline
-        }),
-      });
-
-      if (!response.ok) throw new Error('Research initialization failed');
-      
-      const data = await response.json();
-      setSessionId(data.session_id);
-      // setResearchContent(data.final_content);
-
-      setMessages(prev => [
-        ...prev,
-        {
-          text: `Topic: ${topic}\nOutput Format: ${outputFormat}`,
-          sender: 'user'
-        },
-        {
-          text: data.final_content,
-          sender: 'ai',
-          isResearch: true
-        }
-      ]);
-      
-      setIsNewChat(false);
-    } catch (err) {
-      console.error('Error starting research:', err);
-      setMessages(prev => [...prev, { 
-        text: "Failed to initialize research session. Please try again.", 
-        sender: 'system-error' 
-      }]);
-    }
-    setLoading(false);
-  };
-
-  const handleSend = async (e) => {
-    e.preventDefault();
-    if (!input.trim() || !sessionId) return;
-    
-    setLoading(true);
-    const userMessage = { text: input, sender: 'user' };
-    setMessages(prev => [...prev, userMessage]);
-    
-    try {
-      const response = await fetch('https://research-ai-backend-313190530690.asia-south1.run.app/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          user_input: input,
-          session_id: sessionId
+          user_input: messageText,
+          session_id: activeSessionId,
         }),
       });
 
       if (!response.ok) throw new Error('Chat request failed');
-      
+
       const data = await response.json();
-      
-      setMessages(prev => [...prev, { 
-        text: data.response, 
-        sender: 'ai',
-        isChat: true
-      }]);
+      const responseText = String(data.response || '').trim();
+      if (!responseText) throw new Error('Empty response from backend');
+
+      setMessages((prev) => prev.map((message) => (
+        message.id === pendingMessageId
+          ? { ...message, text: responseText, sender: 'ai', status: 'done' }
+          : message
+      )));
     } catch (err) {
       console.error('Error sending message:', err);
-      setMessages(prev => [...prev, { 
-        text: "Sorry, I couldn't process your request.", 
-        sender: 'ai-error' 
-      }]);
+      setMessages((prev) => prev.map((message) => (
+        message.id === pendingMessageId
+          ? { ...message, text: "Sorry, I couldn't process your request.", sender: 'ai-error', status: 'error' }
+          : message
+      )));
+    } finally {
+      isGeneratingRef.current = false;
+      setIsGeneratingResponse(false);
     }
-    
-    setInput('');
-    setLoading(false);
   };
 
-  const loadChat = async (sessionId) => {
+  const loadChat = async (selectedSessionId) => {
     try {
       setLoading(true);
       setMessages([]);
-      
-      // 1. Get session metadata
+
       const userChatsRef = doc(db, 'user_chats', currentUser.uid);
       const userChatsSnap = await getDoc(userChatsRef);
-      
       if (!userChatsSnap.exists()) throw new Error('No chat sessions found');
 
       const sessions = userChatsSnap.data().sessions || {};
-      const sessionData = sessions[sessionId] || { topic: 'Untitled Session' };
+      const rawSessionData = sessions[selectedSessionId];
+      const resolvedSessionTitle = rawSessionData?.topic || 'Untitled Session';
 
-      // 2. Get messages array from Firestore
-      const sessionRef = doc(db, 'chats', sessionId);
+      const sessionRef = doc(db, 'chats', selectedSessionId);
       const sessionSnap = await getDoc(sessionRef);
       if (!sessionSnap.exists()) throw new Error('Chat session not found');
 
       const messagesData = sessionSnap.data().messages || [];
-      
-      // 3. Process messages with content filtering
       const processedMessages = messagesData
-        .map((msgStr, index) => {
-          try {
-            const msg = JSON.parse(msgStr);
-            const content = typeof msg.content === 'string' 
-              ? parseContentString(msg.content) 
-              : msg.content;
-            const messageType = content[0];
-            const messageContent = content[1];
+        .map((msg, index) => normalizeStoredMessage(msg, index))
+        .filter((msg) => msg !== null);
 
-            // Handle human messages
-            if (msg.type === 'human') {
-              return {
-                id: `msg-${index}`,
-                text: typeof messageContent === 'object' && messageContent !== null
-                  ? `Topic: ${messageContent.topic}\nOutput Format: ${messageContent.output_format}`
-                  : messageContent,
-                sender: 'user',
-                raw: msg
-              };
-            }
-
-            // Handle AI messages
-            if (msg.type === 'ai' && (messageType === 'Final Document' || messageType === 'Chat')) {
-              return {
-                id: `msg-${index}`,
-                text: messageContent,
-                sender: 'ai',
-                isResearch: messageType === 'Final Document',
-                raw: msg
-              };
-            }
-
-            return null;
-          } catch (error) {
-            console.error("Error processing message:", error);
-            return null;
-          }
-        })
-        .filter(msg => msg !== null);
-
-      setSessionId(sessionId);
-      setTopic(sessionData.topic);
-      setMessages([
-        ...processedMessages
-      ]);
-      setIsNewChat(false);
+      setSessionId(selectedSessionId);
+      setSessionTitle(resolvedSessionTitle);
+      sessionIdRef.current = selectedSessionId;
+      sessionTitleRef.current = resolvedSessionTitle;
+      setMessages(processedMessages);
     } catch (error) {
-      console.error("Error loading chat:", error);
+      console.error('Error loading chat:', error);
       setMessages([{
-        text: "Failed to load chat history. Please try again.",
-        sender: 'system-error'
+        text: 'Failed to load chat history. Please try again.',
+        sender: 'system-error',
       }]);
     } finally {
       setLoading(false);
     }
   };
 
-  // Message component remains the same
   const Message = ({ msg }) => {
-    if (msg.isResearch) {
+    if (msg.status === 'pending') {
       return (
-        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-          <h3 className="font-bold mb-2">Research Document:</h3>
-          <MarkdownRenderer content={msg.text} />
+        <div className="max-w-full md:max-w-[75%] p-3 rounded-lg bg-white border border-gray-200">
+          <div className="flex items-center gap-1 text-gray-600">
+            <span className="h-2 w-2 rounded-full bg-blue-500 animate-bounce [animation-delay:-0.2s]" />
+            <span className="h-2 w-2 rounded-full bg-blue-500 animate-bounce [animation-delay:-0.1s]" />
+            <span className="h-2 w-2 rounded-full bg-blue-500 animate-bounce" />
+          </div>
         </div>
       );
     }
-    
+
     return (
       <div
         className={`max-w-full md:max-w-[75%] p-3 rounded-lg ${
@@ -396,7 +427,7 @@ export default function ChatInterface() {
             : 'bg-gray-100 border border-gray-200'
         }`}
       >
-        {msg.sender === 'ai' ? (
+        {msg.sender === 'ai' || msg.sender === 'ai-error' ? (
           <MarkdownRenderer content={msg.text} />
         ) : (
           <div className="whitespace-pre-wrap">{msg.text}</div>
@@ -405,7 +436,10 @@ export default function ChatInterface() {
     );
   };
 
-  const handleShareClick = () => setIsShareModalOpen(true);
+  const handleShareClick = () => {
+    if (!sessionId) return;
+    handleShareChat(sessionId, sessionTitle || 'Untitled Session');
+  };
 
   const handleShareSubmit = async (e) => {
     e.preventDefault();
@@ -413,11 +447,16 @@ export default function ChatInterface() {
     setShareError('');
 
     try {
-      // Find user by email
+      const targetSessionId = shareSessionId || sessionId;
+      const targetSessionTitle = shareSessionTitle || sessionTitle || 'Untitled Session';
+      if (!targetSessionId) {
+        throw new Error('No chat selected to share');
+      }
+
       const usersRef = collection(db, 'users');
       const q = query(usersRef, where('email', '==', shareEmail));
       const querySnapshot = await getDocs(q);
-      
+
       if (querySnapshot.empty) {
         throw new Error('User not found');
       }
@@ -425,21 +464,22 @@ export default function ChatInterface() {
       const userDoc = querySnapshot.docs[0];
       const targetUserId = userDoc.id;
 
-      // Add the session to recipient's user_chats
       const targetUserChatsRef = doc(db, 'user_chats', targetUserId);
       await setDoc(targetUserChatsRef, {
         sessions: {
-          [sessionId]: {
-            topic: topic,
+          [targetSessionId]: {
+            topic: targetSessionTitle,
             createdAt: new Date(),
             sharedBy: currentUser.email,
-            isShared: true
-          }
-        }
+            isShared: true,
+          },
+        },
       }, { merge: true });
 
       setIsShareModalOpen(false);
       setShareEmail('');
+      setShareSessionId(null);
+      setShareSessionTitle('');
     } catch (error) {
       console.error('Sharing error:', error);
       setShareError(error.message || 'Failed to share chat');
@@ -450,10 +490,80 @@ export default function ChatInterface() {
 
   return (
     <div className="flex h-screen bg-gray-100 overflow-x-hidden">
+      <Transition appear show={isRenameModalOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-10" onClose={closeRenameModal}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-300"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-200"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-opacity-25" />
+          </Transition.Child>
 
-      {/* Share Modal */}
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center p-4 text-center">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-300"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-200"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-xl transition-all">
+                  <Dialog.Title className="text-lg font-medium leading-6 text-gray-900">
+                    Rename Chat Session
+                  </Dialog.Title>
+
+                  <form onSubmit={handleRenameSubmit} className="mt-4 space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">
+                        Chat Name
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                      />
+                    </div>
+
+                    {renameError && (
+                      <p className="text-red-500 text-sm">{renameError}</p>
+                    )}
+
+                    <div className="flex justify-end space-x-4">
+                      <button
+                        type="button"
+                        onClick={closeRenameModal}
+                        className="inline-flex justify-center rounded-md border border-transparent bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={renameLoading || !renameValue.trim()}
+                        className="inline-flex justify-center rounded-md border border-transparent bg-blue-900 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none disabled:opacity-50"
+                      >
+                        {renameLoading ? 'Renaming...' : 'Rename'}
+                      </button>
+                    </div>
+                  </form>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
       <Transition appear show={isShareModalOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-10" onClose={() => setIsShareModalOpen(false)}>
+        <Dialog as="div" className="relative z-10" onClose={closeShareModal}>
           <Transition.Child
             as={Fragment}
             enter="ease-out duration-300"
@@ -503,7 +613,7 @@ export default function ChatInterface() {
                     <div className="flex justify-end space-x-4">
                       <button
                         type="button"
-                        onClick={() => setIsShareModalOpen(false)}
+                        onClick={closeShareModal}
                         className="inline-flex justify-center rounded-md border border-transparent bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none"
                       >
                         Cancel
@@ -524,7 +634,6 @@ export default function ChatInterface() {
         </Dialog>
       </Transition>
 
-      {/* Mobile Sidebar */}
       <div className={`fixed inset-0 z-40 flex md:hidden ${isSidebarOpen ? '' : 'pointer-events-none'}`}>
         <div
           className={`fixed inset-0 bg-opacity-25 transition-opacity ${isSidebarOpen ? 'opacity-100' : 'opacity-0'}`}
@@ -537,12 +646,14 @@ export default function ChatInterface() {
             searchTerm={searchTerm}
             setSearchTerm={setSearchTerm}
             handleNewChat={handleNewChat}
+            handleDeleteChat={handleDeleteChat}
+            handleRenameChat={handleRenameChat}
+            handleShareChat={handleShareChat}
             loadChat={loadChat}
           />
         </div>
       </div>
 
-      {/* Desktop Sidebar */}
       <div
         className={`hidden md:flex md:flex-col bg-white border-r border-gray-200 pt-16 transition-all duration-300 ${isSidebarOpen ? 'md:w-64' : 'md:w-0 md:overflow-hidden'}`}
       >
@@ -551,12 +662,14 @@ export default function ChatInterface() {
             searchTerm={searchTerm}
             setSearchTerm={setSearchTerm}
             handleNewChat={handleNewChat}
+            handleDeleteChat={handleDeleteChat}
+            handleRenameChat={handleRenameChat}
+            handleShareChat={handleShareChat}
             loadChat={loadChat}
           />
         )}
       </div>
-      
-      {/* Main Chat Area */}
+
       <div className="flex-1 flex flex-col pt-16">
         <div className="p-4 border-b border-gray-200 bg-white flex items-center justify-between">
           <div className="flex items-center">
@@ -587,7 +700,7 @@ export default function ChatInterface() {
               </svg>
             </button>
             <h2 className="text-lg font-semibold text-blue-900">
-              {sessionId ? `Research: ${topic}` : 'New Research Session'}
+              {sessionId ? `Chat: ${sessionTitle || 'Untitled Session'}` : 'New Chat'}
             </h2>
           </div>
           {sessionId && (
@@ -599,63 +712,19 @@ export default function ChatInterface() {
             </button>
           )}
         </div>
-        
+
         <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-24">
           {messages.length === 0 ? (
             <div className="flex items-center justify-center h-full">
-              {isNewChat ? (
-                <div className="text-center max-w-md w-full space-y-4">
-                  <h3 className="text-xl font-medium">Start New Research</h3>
-                  <form onSubmit={handleInitialSubmit} className="space-y-4">
-                    <div>
-                      <input
-                        type="text"
-                        value={topic}
-                        onChange={(e) => setTopic(e.target.value)}
-                        placeholder="Research Topic"
-                        className="w-full p-3 border border-gray-300 rounded text-sm"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <input
-                        type="text"
-                        value={outputFormat}
-                        onChange={(e) => setOutputFormat(e.target.value)}
-                        placeholder="Output Format (e.g., Report, Summary)"
-                        className="w-full p-3 border border-gray-300 rounded text-sm"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <input
-                        type="text"
-                        value={outline}
-                        onChange={(e) => setOutline(e.target.value)}
-                        placeholder="Outline (Optional)"
-                        className="w-full p-3 border border-gray-300 rounded text-sm"
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      className="w-full px-4 py-2 bg-blue-900 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm"
-                      disabled={!topic || !outputFormat || loading}
-                    >
-                      {loading ? 'Initializing...' : 'Start Research'}
-                    </button>
-                  </form>
-                </div>
-              ) : (
-                <div className="text-center">
-                  <h3 className="text-xl font-medium">Ready for Research</h3>
-                  <p className="text-gray-600 text-sm">Start asking questions about your topic</p>
-                </div>
-              )}
+              <div className="text-center">
+                <h3 className="text-xl font-medium">Start a New Chat</h3>
+                <p className="text-gray-600 text-sm">Describe your research request in the message box below.</p>
+              </div>
             </div>
           ) : (
             messages.map((msg, index) => (
-              <div 
-                key={index} 
+              <div
+                key={msg.id || index}
                 className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <Message msg={msg} />
@@ -663,28 +732,26 @@ export default function ChatInterface() {
             ))
           )}
         </div>
-        
-        {!isNewChat && (
-          <div className="sticky bottom-0 p-4 border-t border-gray-200 bg-white">
-            <form onSubmit={handleSend} className="flex gap-2">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask a research question..."
-                className="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                disabled={loading}
-              />
-              <button
-                type="submit"
-                className="px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm"
-                disabled={loading || !input.trim()}
-              >
-                {loading ? 'Sending...' : 'Send'}
-              </button>
-            </form>
-          </div>
-        )}
+
+        <div className="sticky bottom-0 p-4 border-t border-gray-200 bg-white">
+          <form onSubmit={handleSend} className="flex gap-2">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={sessionId ? 'Ask a follow-up question...' : 'Describe what you want to research...'}
+              className="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              disabled={loading || isGeneratingResponse}
+            />
+            <button
+              type="submit"
+              className="px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm"
+              disabled={loading || isGeneratingResponse || !input.trim()}
+            >
+              Send
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );
