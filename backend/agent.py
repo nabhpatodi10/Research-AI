@@ -1,85 +1,110 @@
 import asyncio
 import operator
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, NotRequired, TypedDict
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
 from langchain.chat_models import BaseChatModel
+from langchain.tools import ToolRuntime, tool
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage, SystemMessage
+from langgraph.graph import END, StateGraph
+from langgraph.types import Command
 from playwright.async_api import Browser
 
 from database import Database
+from graph import ResearchGraph
+from structures import CompleteDocument
 from tools import Tools
-
+from nodes import Nodes
 
 class AgentExecutionState(TypedDict):
     messages: Annotated[list[BaseMessage], operator.add]
-    chat_history: list[BaseMessage]
+    chat_history: NotRequired[list[BaseMessage]]
+    research_idea: NotRequired[str]
+    final_document: NotRequired[str]
 
 
-def _is_non_gpt_model(model: BaseChatModel) -> bool:
-    model_attr = str(getattr(model, "model", "") or "").lower()
-    model_name_attr = str(getattr(model, "model_name", "") or "").lower()
-    has_model_id = bool(model_attr or model_name_attr)
-    return has_model_id and ("gpt" not in model_attr) and ("gpt" not in model_name_attr)
+def _message_text(message: BaseMessage) -> str:
+    text = getattr(message, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+
+    content = getattr(message, "content", "")
+    if isinstance(content, str):
+        return content.strip()
+    return str(content).strip()
 
 
-def _strip_reasoning_blocks_if_needed(message: BaseMessage, model: BaseChatModel) -> BaseMessage:
-    if not isinstance(message, AIMessage):
-        return message
-    if not _is_non_gpt_model(model):
-        return message
+def _message_role(message: BaseMessage) -> str:
+    if isinstance(message, HumanMessage):
+        return "User"
+    if isinstance(message, AIMessage):
+        return "Assistant"
+    if isinstance(message, ToolMessage):
+        tool_name = message.name or "tool"
+        return f"Tool({tool_name})"
+    return message.__class__.__name__
 
-    response_metadata = getattr(message, "response_metadata", None) or {}
-    source_model_name = str(response_metadata.get("model_name", "") or "").lower()
-    if "gpt" not in source_model_name:
-        return message
 
-    content_blocks = getattr(message, "content_blocks", None)
-    if not isinstance(content_blocks, list):
-        return message
+async def _summarize_older_messages(messages: list[BaseMessage], model: BaseChatModel) -> AIMessage | None:
+    if not messages:
+        return None
 
-    blocks = [
-        block
-        for block in content_blocks
-        if not (isinstance(block, dict) and block.get("type") == "reasoning")
-    ]
+    max_chars = 48000
+    transcript_lines: list[str] = []
+    used_chars = 0
+    for message in messages:
+        text = _message_text(message)
+        if not text:
+            continue
+        line = f"{_message_role(message)}: {text}"
+        if used_chars + len(line) > max_chars:
+            break
+        transcript_lines.append(line)
+        used_chars += len(line)
+
+    if not transcript_lines:
+        return None
+
     try:
-        return AIMessage(
-            content=message.content,
-            content_blocks=blocks,
-            name=message.name,
-            id=message.id,
-            tool_calls=message.tool_calls,
-            response_metadata=message.response_metadata,
-            additional_kwargs=message.additional_kwargs,
-        )
+        summary_response = await model.ainvoke(Nodes().generate_conversation_summary(transcript_lines))
+        summary_text = _message_text(summary_response)
     except Exception:
-        return message
+        summary_text = "\n".join(transcript_lines[-12:])
+
+    if not summary_text:
+        return None
+
+    return AIMessage(content=f"Summary of earlier conversation before latest 5 turns:\n{summary_text}")
 
 
 async def get_chat_history(database: Database, session_id: str, model: BaseChatModel) -> list[BaseMessage]:
     previous_messages = await database.get_messages(session_id)
-    chat_history: list[BaseMessage] = []
+    recent_history: list[BaseMessage] = []
+    older_history: list[BaseMessage] = []
     if not previous_messages:
-        return chat_history
+        return recent_history
 
-    conversation_turns = 7
+    conversation_turns = 5
     for idx, message in enumerate(reversed(previous_messages), start=1):
-        if conversation_turns <= 0:
-            break
+        if not isinstance(message, (HumanMessage, AIMessage, ToolMessage)):
+            continue
 
-        message = _strip_reasoning_blocks_if_needed(message, model)
-        if isinstance(message, HumanMessage):
-            chat_history.insert(0, message)
-            conversation_turns -= 1
-        elif isinstance(message, (AIMessage, ToolMessage)):
-            chat_history.insert(0, message)
+        if conversation_turns > 0:
+            recent_history.insert(0, message)
+            if isinstance(message, HumanMessage):
+                conversation_turns -= 1
+        else:
+            older_history.insert(0, message)
 
         # Yield periodically when scanning large histories to keep loop responsive.
         if idx % 100 == 0:
             await asyncio.sleep(0)
-    return chat_history
+
+    summary_message = await _summarize_older_messages(older_history, model)
+    if summary_message is not None:
+        return [summary_message, *recent_history]
+    return recent_history
 
 
 class ChatHistoryMiddleware(AgentMiddleware[AgentExecutionState, Any]):
@@ -145,7 +170,37 @@ def _normalize_system_prompt(
     return system_prompt
 
 
+def _extract_last_ai_message(messages: list[BaseMessage]) -> AIMessage | None:
+    for message in reversed(messages):
+        if isinstance(message, AIMessage):
+            return message
+    return None
+
+
 class Agent:
+    async def __run_research_graph(self, state: AgentExecutionState) -> dict[str, Any]:
+        research_idea = str(state.get("research_idea", "") or "").strip()
+        if not research_idea:
+            no_idea_message = AIMessage(
+                content="I need a specific research idea before handing off to the research workflow."
+            )
+            await self.__database.add_messages(self.__session_id, [no_idea_message])
+            return {"messages": [no_idea_message]}
+
+        graph_result = await self.__research_graph.graph.ainvoke({"research_idea": research_idea})
+        final_document = graph_result.get("final_document")
+
+        if isinstance(final_document, CompleteDocument):
+            final_document_text = final_document.as_str
+        elif final_document is None:
+            final_document_text = "The research workflow completed, but no final document was returned."
+        else:
+            final_document_text = str(final_document)
+
+        final_message = AIMessage(content=final_document_text)
+        await self.__database.add_messages(self.__session_id, [final_message])
+        return {"final_document": final_document_text, "messages": [final_message]}
+
     def __init__(
         self,
         session_id: str,
@@ -154,8 +209,37 @@ class Agent:
         system_prompt: SystemMessage | list[SystemMessage] | str | None,
         browser: Browser,
     ):
-        tool_list = Tools(session_id, database, browser).return_tools()
-        self.graph = create_agent(
+        self.__session_id = session_id
+        self.__database = database
+        self.__research_graph = ResearchGraph(session_id, database, browser)
+
+        @tool
+        def handoff_to_research_graph(
+            research_idea: str,
+            runtime: ToolRuntime[None, AgentExecutionState],
+        ) -> Command:
+            """Handoff to the research graph to generate a full research document for the provided research idea."""
+            idea = str(research_idea or "").strip()
+            last_ai_message = _extract_last_ai_message(runtime.state.get("messages", []))
+            tool_response = ToolMessage(
+                content=f"Handoff initiated to research graph for research idea: {idea}",
+                tool_call_id=runtime.tool_call_id or "handoff_to_research_graph",
+            )
+            transfer_messages: list[BaseMessage] = [tool_response]
+            if last_ai_message is not None:
+                transfer_messages = [last_ai_message, tool_response]
+
+            return Command(
+                goto="research_graph",
+                graph=Command.PARENT,
+                update={
+                    "research_idea": idea,
+                    "messages": transfer_messages,
+                },
+            )
+
+        tool_list = Tools(session_id, database, browser).return_tools() + [handoff_to_research_graph]
+        chat_agent = create_agent(
             model=model,
             tools=tool_list,
             system_prompt=_normalize_system_prompt(system_prompt),
@@ -166,3 +250,11 @@ class Agent:
             ],
             state_schema=AgentExecutionState,
         )
+
+        orchestrator = StateGraph(AgentExecutionState)
+        orchestrator.add_node("chat_agent", chat_agent)
+        orchestrator.add_node("research_graph", self.__run_research_graph)
+        orchestrator.add_edge("chat_agent", END)
+        orchestrator.add_edge("research_graph", END)
+        orchestrator.set_entry_point("chat_agent")
+        self.graph = orchestrator.compile()
