@@ -27,7 +27,8 @@ class OutlineSection(BaseModel):
 
 
 class Outline(BaseModel):
-    page_title: str = Field(title="Title of the Research Document")
+    document_title: str = Field(title="Title of the Research Document")
+    document_description: str = Field(title="Detailed description of the Research Document's focus and scope.")
     sections: List[OutlineSection] = Field(
         default_factory=list,
         title="Titles and descriptions for each section of the Research Document.",
@@ -36,40 +37,27 @@ class Outline(BaseModel):
     @property
     def as_str(self) -> str:
         sections = "\n\n".join(section.as_str for section in self.sections)
-        return f"# {self.page_title}\n\n{sections}".strip()
-    
-class Related_Topics(BaseModel):
-    topics: List[str] = Field(
-        default_factory=list,
-        title="List of related topics."
+        return f"# {self.document_title}\n\n## Research Document Description\n{self.document_description}\n\n{sections}".strip()
+
+class Expert(BaseModel):
+    name: str = Field(
+        description="Name of the expert."
+    )
+    profession: str = Field(
+        description="Profession of the expert which would help in understanding the perspective and point of view of the expert and also would help in understanding the relevance of the expert to the research topic.",
+    )
+    role: str = Field(
+        description="Expert's role for the given research project, including their focus, concerns, motives, ideologies, etc.",
     )
 
     @property
     def as_str(self) -> str:
-        return ", ".join(self.topics).strip()
-
-class Editor(BaseModel):
-    affiliation: str = Field(
-        description="Primary affiliation of the editor.",
-    )
-    name: str = Field(
-        description="Name of the editor."
-    )
-    role: str = Field(
-        description="Role of the editor in the context of the topic.",
-    )
-    description: str = Field(
-        description="Description of the editor's focus, concerns, and motives.",
-    )
-
-    @property
-    def persona(self) -> str:
-        return f"Name: {self.name}\nRole: {self.role}\nAffiliation: {self.affiliation}\nDescription: {self.description}\n"
+        return f"Name: {self.name}\nProfession: {self.profession}\nRole: {self.role}\n"
 
 
 class Perspectives(BaseModel):
-    editors: List[Editor] = Field(
-        description="Comprehensive list of editors with their roles and affiliations."
+    experts: List[Expert] = Field(
+        description="Comprehensive list of experts with their roles and affiliations."
     )
 
 class ContentSection(BaseModel):
@@ -81,7 +69,7 @@ class ContentSection(BaseModel):
     def as_str(self) -> str:
         citations = "\n".join([f" [{i}] {cit}" for i, cit in enumerate(self.citations)])
         return (
-            f"## {self.section_title}\n\n{self.content}".strip()
+            f"## {self.section_title}\n\n{self.content}".strip().strip("#").strip("#").strip()
             + f"\n\n{citations}".strip()
         )
 
@@ -94,8 +82,12 @@ class CompleteDocument(BaseModel):
 
     @property
     def as_str(self) -> str:
-        sections = "\n\n".join(section.as_str for section in self.sections)
-        return f"# {self.title}\n\n{sections}".strip()
+        references = [].extend(section.citations for section in self.sections)
+        references = list(set(references))
+        references = "\n".join([f" [{i}] {cit}" for i, cit in enumerate(references)])
+        sections = [f"## {section.section_title}\n\n{section.content}".strip() for section in self.sections]
+        sections = "\n\n".join(sections)
+        return f"# {self.title}\n\n{sections}\n\n## References\n{references}".strip()
     
 class AgentState(TypedDict):
     messages: Annotated[List[AnyMessage], operator.add]
