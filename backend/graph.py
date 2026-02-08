@@ -25,16 +25,56 @@ class graphSchema(TypedDict):
     final_document: CompleteDocument
 
 class ResearchGraph:
+
+    @staticmethod
+    def __expert_count_for_breadth(research_breadth: str) -> int:
+        if research_breadth == "low":
+            return 1
+        if research_breadth == "high":
+            return 5
+        return 3
     
-    def __init__(self, session_id: str, database: Database, browser: Browser):
+    def __init__(
+        self,
+        session_id: str,
+        database: Database,
+        browser: Browser,
+        model_tier: str = "pro",
+        research_breadth: str = "medium",
+        research_depth: str = "high",
+        document_length: str = "high",
+    ):
         self.__node = Nodes()
-        self.__gpt_model = ChatOpenAI(model = "gpt-5-mini", reasoning={"effort": "medium"}, verbosity="high", use_responses_api=True, service_tier="priority", timeout=180.0)
-        self.__gemini_model = ChatGoogleGenerativeAI(model = "gemini-3-flash-preview", thinking_level="high")
+        gpt_model_name = "gpt-5-nano" if model_tier == "mini" else "gpt-5-mini"
+        self.__gemini_model = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", thinking_level="high") if model_tier == "pro" else ChatGoogleGenerativeAI(model="models/gemini-flash-latest", thinking_budget=-1)
+        verbosity = document_length if document_length in {"low", "medium", "high"} else "high"
+        self.__research_breadth = research_breadth
+        self.__expert_count = self.__expert_count_for_breadth(research_breadth)
+        self.__gpt_model = ChatOpenAI(
+            model=gpt_model_name,
+            reasoning={"effort": "medium"},
+            verbosity=verbosity,
+            use_responses_api=True,
+            service_tier="priority",
+            timeout=180.0,
+        )
         self.__summary_model = ChatGoogleGenerativeAI(model = "models/gemini-flash-lite-latest")
-        self.__final_content_model = ChatOpenAI(model = "gpt-5-mini", reasoning={"effort": "high"}, verbosity="high", use_responses_api=True, service_tier="priority", timeout=180.0)
+        self.__final_content_model = ChatOpenAI(
+            model=gpt_model_name,
+            reasoning={"effort": "high"},
+            verbosity=verbosity,
+            use_responses_api=True,
+            service_tier="priority",
+            timeout=180.0,
+        )
         self.__section_attempt_timeout_seconds = 300.0
         self.__section_retry_delays = (0.5, 1.0)
-        self.__tools = Tools(session_id, database, browser).return_tools()
+        self.__tools = Tools(
+            session_id=session_id,
+            database=database,
+            browser=browser,
+            research_depth=research_depth,
+        ).return_tools()
         __graph = StateGraph(graphSchema)
         __graph.add_node("generate_document_outline", self.__generate_document_outline)
         __graph.add_node("generate_perspectives", self.__generate_perspectives)
@@ -220,10 +260,13 @@ class ResearchGraph:
     
     async def __generate_perspectives(self, state: graphSchema):
         perspectives: Perspectives = await self.__gemini_model.with_structured_output(Perspectives).ainvoke(
-            self.__node.generate_perspectives(state["document_outline"].as_str)
+            self.__node.generate_perspectives(
+                state["document_outline"].as_str,
+                count=self.__expert_count,
+            )
         )
-        if len(perspectives.experts) > 4:
-            perspectives = Perspectives(experts=perspectives.experts[:4])
+        if len(perspectives.experts) > self.__expert_count:
+            perspectives = Perspectives(experts=perspectives.experts[: self.__expert_count])
         return {"perspectives": perspectives}
     
     async def __generate_content_for_perspectives(self, state: graphSchema):
@@ -297,8 +340,37 @@ class ResearchGraph:
             perspective_content.append(row)
 
         return {"perspective_content": perspective_content}
+
+    def __build_low_breadth_document(self, state: graphSchema) -> CompleteDocument:
+        sections = list(state["document_outline"].sections)
+        perspective_rows = list(state.get("perspective_content", []))
+        final_sections: list[ContentSection] = []
+
+        for section_index, outline_section in enumerate(sections):
+            section_title = str(getattr(outline_section, "section_title", f"Section {section_index + 1}") or f"Section {section_index + 1}")
+            section_text = ""
+            if section_index < len(perspective_rows) and perspective_rows[section_index]:
+                section_text = str(perspective_rows[section_index][0] or "").strip()
+            if not section_text:
+                section_text = self.__fallback_section_text(section_title)
+
+            final_sections.append(
+                ContentSection(
+                    section_title=section_title,
+                    content=section_text,
+                    citations=[],
+                )
+            )
+
+        return CompleteDocument(
+            title=state["document_outline"].document_title,
+            sections=final_sections,
+        )
     
     async def __final_section_generation(self, state: graphSchema):
+        if self.__research_breadth == "low":
+            return {"final_document": self.__build_low_breadth_document(state)}
+
         final_sections: list[ContentSection] = []
         summary = None
         for section_content in state["perspective_content"]:
