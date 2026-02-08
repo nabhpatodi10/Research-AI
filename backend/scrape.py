@@ -5,6 +5,8 @@ from playwright.async_api import Browser, Page, TimeoutError as PlaywrightTimeou
 from playwright_stealth import Stealth
 from langchain_core.documents import Document
 
+SCRAPE_TIMEOUT_MS = 20_000
+
 def _extract_text_and_title(html: str, url: str, provided_title: str | None, page_title: str | None) -> tuple[str, str]:
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text(separator="\n", strip=True)
@@ -94,15 +96,17 @@ class Scrape:
             raise ValueError("PDF URLs are not supported by the HTML scraper.")
 
         try:
-            await page.goto(url, timeout=60000, wait_until="domcontentloaded")
+            await page.goto(url, timeout=SCRAPE_TIMEOUT_MS, wait_until="domcontentloaded")
             return
+        except asyncio.CancelledError:
+            raise
         except PlaywrightTimeoutError:
             raise
         except Exception as exc:
             message = str(exc)
             if "err_http2_protocol_error" in message.lower():
                 # Retry once with a lighter wait target for flaky HTTP/2 endpoints.
-                await page.goto(url, timeout=45000, wait_until="commit")
+                await page.goto(url, timeout=SCRAPE_TIMEOUT_MS, wait_until="commit")
                 return
             raise
 
@@ -111,7 +115,7 @@ class Scrape:
             page = await self._new_page()
             try:
                 await self._goto_page(page, url)
-                await page.wait_for_selector("body", timeout=60000)
+                await page.wait_for_selector("body", timeout=SCRAPE_TIMEOUT_MS)
 
                 page_title = None
                 try:
@@ -135,8 +139,13 @@ class Scrape:
                     metadata={"source": url, "title": resolved_title},
                 )
             finally:
-                if not page.is_closed():
-                    await page.close()
+                try:
+                    if not page.is_closed():
+                        await page.close()
+                except Exception:
+                    pass
+        except asyncio.CancelledError:
+            raise
         except PlaywrightTimeoutError:
             print(f"Timeout error while accessing {url}")
             return None
