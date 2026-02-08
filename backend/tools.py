@@ -11,13 +11,21 @@ from nodes import Nodes
 
 class Tools:
 
-    def __init__(self, session_id: str, database: Database, browser: Browser):
+    def __init__(
+        self,
+        session_id: str,
+        database: Database,
+        browser: Browser,
+        research_depth: str = "high",
+    ):
         self.__search = CustomSearch()
         self.__scrape = Scrape(browser)
         self.__database = database
         self.__session_id = session_id
         self.__model = ChatGoogleGenerativeAI(model = "models/gemini-flash-lite-latest")
         self.__nodes = Nodes()
+        self.__web_search_total_timeout_seconds = 30.0
+        self.__min_web_documents_before_stop = 1 if research_depth == "low" else 3
 
     async def __scrape_with_timeout(
         self,
@@ -93,31 +101,30 @@ class Tools:
         value_str = str(value).strip()
         return value_str if value_str else default
 
-    async def web_search_tool(self, query: str) -> str:
-        """Web Search tool to access documents from the web based on the given search query"""
+    async def __web_search_impl(self, query: str) -> str:
+        __urls = await self.__search.search(query, 5)
+        if not __urls:
+            return "No search results found."
+
+        per_url_timeout_seconds = 20.0
+        overall_scrape_timeout_seconds = 20.0
+        min_documents_before_stop = self.__min_web_documents_before_stop
+        max_documents = 5
+
+        scrape_tasks = {
+            asyncio.create_task(
+                self.__scrape_with_timeout(url, title, per_url_timeout_seconds)
+            ): url
+            for url, title in __urls.items()
+        }
+
+        documents: list[Document] = []
+        seen_sources: set[str] = set()
+        pending = set(scrape_tasks.keys())
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + overall_scrape_timeout_seconds
+
         try:
-            __urls = await self.__search.search(query, 5)
-            if not __urls:
-                return "No search results found."
-
-            per_url_timeout_seconds = 20.0
-            overall_scrape_timeout_seconds = 20.0
-            min_documents_before_stop = 3
-            max_documents = 5
-
-            scrape_tasks = {
-                asyncio.create_task(
-                    self.__scrape_with_timeout(url, title, per_url_timeout_seconds)
-                ): url
-                for url, title in __urls.items()
-            }
-
-            documents: list[Document] = []
-            seen_sources: set[str] = set()
-            pending = set(scrape_tasks.keys())
-            loop = asyncio.get_running_loop()
-            deadline = loop.time() + overall_scrape_timeout_seconds
-
             while pending and len(documents) < max_documents:
                 remaining = deadline - loop.time()
                 if remaining <= 0:
@@ -157,24 +164,35 @@ class Tools:
 
                 if len(documents) >= min_documents_before_stop:
                     break
-
+        finally:
             if pending:
                 for task in pending:
                     task.cancel()
                 await asyncio.gather(*pending, return_exceptions=True)
 
-            if not documents:
-                return "Search results were found, but no scrapeable page content was extracted."
+        if not documents:
+            return "Search results were found, but no scrapeable page content was extracted."
 
-            await self.__database.add_data(self.__session_id, documents)
-            summaries = await asyncio.gather(*[self.__get_doc_summary(doc) for doc in documents])
-            return "\n----------------\n".join(
-                [
-                    f"Title: {self.__doc_meta_value(doc, 'title')}\nContent:{summaries[_]}\nSource: {self.__doc_meta_value(doc, 'source')}"
-                    for _, doc in enumerate(documents)
-                    if summaries[_] is not None
-                ]
+        await self.__database.add_data(self.__session_id, documents)
+        summaries = await asyncio.gather(*[self.__get_doc_summary(doc) for doc in documents])
+        return "\n----------------\n".join(
+            [
+                f"Title: {self.__doc_meta_value(doc, 'title')}\nContent:{summaries[_]}\nSource: {self.__doc_meta_value(doc, 'source')}"
+                for _, doc in enumerate(documents)
+                if summaries[_] is not None
+            ]
+        )
+
+    async def web_search_tool(self, query: str) -> str:
+        """Web Search tool to access documents from the web based on the given search query"""
+        try:
+            return await asyncio.wait_for(
+                self.__web_search_impl(query),
+                timeout=self.__web_search_total_timeout_seconds,
             )
+        except asyncio.TimeoutError:
+            print(f"Web search tool exceeded total timeout of {self.__web_search_total_timeout_seconds:.0f}s.")
+            return "An error occured: web search tool timed out, you can try again with a different query."
         except Exception as e:
             return f"An error occured: {str(e)}"
     
