@@ -1,13 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { auth } from '../firebase';
-import { 
-  onAuthStateChanged, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  signOut,
-  GoogleAuthProvider,
-  signInWithPopup
-} from 'firebase/auth';
+import { apiRequest, API_BASE_URL } from '../lib/api';
 
 const AuthContext = createContext();
 
@@ -15,37 +7,73 @@ export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const signup = (email, password) => {
-    return createUserWithEmailAndPassword(auth, email, password);
+  const refreshUser = async () => {
+    try {
+      const payload = await apiRequest('/auth/me', { method: 'GET' });
+      setCurrentUser(payload?.user || null);
+      return payload?.user || null;
+    } catch {
+      setCurrentUser(null);
+      return null;
+    }
   };
 
-  const login = (email, password) => {
-    return signInWithEmailAndPassword(auth, email, password);
+  const signup = async (name, email, password) => {
+    const payload = await apiRequest('/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ name, email, password }),
+    });
+    setCurrentUser(payload.user || null);
+    return payload.user;
+  };
+
+  const login = async (email, password) => {
+    const payload = await apiRequest('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+    setCurrentUser(payload.user || null);
+    return payload.user;
   };
 
   const googleLogin = () => {
-    return signInWithPopup(auth, new GoogleAuthProvider());
+    window.location.href = `${API_BASE_URL}/auth/google/start`;
   };
 
-  const logout = () => {
-    return signOut(auth);
+  const logout = async () => {
+    await apiRequest('/auth/logout', { method: 'POST' });
+    setCurrentUser(null);
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      setLoading(false);
-    });
+    let active = true;
 
-    return unsubscribe;
+    (async () => {
+      try {
+        const payload = await apiRequest('/auth/me', { method: 'GET' });
+        if (!active) return;
+        setCurrentUser(payload?.user || null);
+      } catch {
+        if (!active) return;
+        setCurrentUser(null);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const value = {
     currentUser,
+    loading,
+    refreshUser,
     signup,
     login,
     googleLogin,
-    logout
+    logout,
   };
 
   return (
