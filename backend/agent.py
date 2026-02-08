@@ -1,6 +1,7 @@
 import asyncio
 import operator
 from typing import Annotated, Any, NotRequired, TypedDict
+from uuid import uuid4
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
@@ -107,6 +108,51 @@ async def get_chat_history(database: Database, session_id: str, model: BaseChatM
     return recent_history
 
 
+async def build_research_handoff_context(
+    database: Database,
+    session_id: str,
+    model: BaseChatModel,
+    additional_user_context: str | None = None,
+) -> str:
+    history = await get_chat_history(database, session_id, model)
+    transcript_lines: list[str] = []
+    for message in history:
+        if not isinstance(message, (HumanMessage, AIMessage, ToolMessage)):
+            continue
+        text = _message_text(message)
+        if not text:
+            continue
+        transcript_lines.append(f"{_message_role(message)}: {text}")
+
+    latest_context = str(additional_user_context or "").strip()
+    if latest_context:
+        transcript_lines.append(f"Latest user context: {latest_context}")
+
+    if not transcript_lines:
+        return latest_context
+
+    summarize_prompt: list[BaseMessage] = [
+        SystemMessage(
+            content=(
+                "Create a concise research handoff brief from this conversation. "
+                "Capture: research idea, document requirements/output format, constraints, and important specifics. "
+                "If any category is missing, say 'Not specified'."
+            )
+        ),
+        HumanMessage(content="Conversation:\n\n" + "\n\n".join(transcript_lines)),
+    ]
+    try:
+        summary_response = await model.ainvoke(summarize_prompt)
+        summary_text = _message_text(summary_response).strip()
+        if summary_text:
+            return summary_text
+    except Exception:
+        pass
+
+    fallback = "\n\n".join(transcript_lines[-12:]).strip()
+    return fallback or latest_context
+
+
 class ChatHistoryMiddleware(AgentMiddleware[AgentExecutionState, Any]):
     def __init__(self, database: Database, session_id: str, model: BaseChatModel):
         self._database = database
@@ -157,6 +203,75 @@ class UnknownToolFallbackMiddleware(AgentMiddleware[AgentExecutionState, Any]):
             tool_call_id=tool_call_id,
             name=tool_name,
             content="bad tool name, retry",
+        )
+
+
+class ResearchCommandMiddleware(AgentMiddleware[AgentExecutionState, Any]):
+    def __init__(
+        self,
+        force_research_payload: str | None = None,
+        ask_research_topic_only: bool = False,
+    ):
+        self._force_research_payload = str(force_research_payload or "").strip()
+        self._ask_research_topic_only = bool(ask_research_topic_only)
+
+    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
+        if self._ask_research_topic_only:
+            ask_instruction = SystemMessage(
+                content=(
+                    "The user requested deep research but did not provide a topic. "
+                    "Ask one concise follow-up question requesting the topic/idea and any output requirements. "
+                    "Do not call tools."
+                )
+            )
+            response = await handler(request.override(messages=[ask_instruction, *request.messages]))
+            if isinstance(response, AIMessage):
+                if getattr(response, "tool_calls", None):
+                    return AIMessage(
+                        content=(
+                            "Sure. What topic or idea should I research, and are there any specific "
+                            "requirements for the final document?"
+                        )
+                    )
+                if _message_text(response):
+                    return response
+            return AIMessage(
+                content=(
+                    "Sure. What topic or idea should I research, and are there any specific "
+                    "requirements for the final document?"
+                )
+            )
+
+        if not self._force_research_payload:
+            return await handler(request)
+
+        force_instruction = SystemMessage(
+            content=(
+                "You must call the tool `handoff_to_research_graph` exactly once using the provided research context. "
+                "Do not answer directly before calling the tool."
+            )
+        )
+        forced_request = request.override(
+            messages=[force_instruction, HumanMessage(content=self._force_research_payload)]
+        )
+        response = await handler(forced_request)
+
+        if isinstance(response, AIMessage):
+            tool_calls = getattr(response, "tool_calls", None) or []
+            for tool_call in tool_calls:
+                if isinstance(tool_call, dict) and tool_call.get("name") == "handoff_to_research_graph":
+                    return response
+
+        return AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "handoff_to_research_graph",
+                    "args": {"research_idea": self._force_research_payload},
+                    "id": f"force_handoff_{uuid4().hex}",
+                    "type": "tool_call",
+                }
+            ],
         )
 
 
@@ -227,10 +342,24 @@ class Agent:
         model: BaseChatModel,
         system_prompt: SystemMessage | list[SystemMessage] | str | None,
         browser: Browser,
+        model_tier: str = "pro",
+        research_breadth: str = "medium",
+        research_depth: str = "high",
+        document_length: str = "high",
+        force_research_payload: str | None = None,
+        ask_research_topic_only: bool = False,
     ):
         self.__session_id = session_id
         self.__database = database
-        self.__research_graph = ResearchGraph(session_id, database, browser)
+        self.__research_graph = ResearchGraph(
+            session_id=session_id,
+            database=database,
+            browser=browser,
+            model_tier=model_tier,
+            research_breadth=research_breadth,
+            research_depth=research_depth,
+            document_length=document_length,
+        )
 
         @tool
         def handoff_to_research_graph(
@@ -257,12 +386,21 @@ class Agent:
                 },
             )
 
-        tool_list = Tools(session_id, database, browser).return_tools() + [handoff_to_research_graph]
+        tool_list = Tools(
+            session_id=session_id,
+            database=database,
+            browser=browser,
+            research_depth=research_depth,
+        ).return_tools() + [handoff_to_research_graph]
         chat_agent = create_agent(
             model=model,
             tools=tool_list,
             system_prompt=_normalize_system_prompt(system_prompt),
             middleware=[
+                ResearchCommandMiddleware(
+                    force_research_payload=force_research_payload,
+                    ask_research_topic_only=ask_research_topic_only,
+                ),
                 ChatHistoryMiddleware(database, session_id, model),
                 UnknownToolFallbackMiddleware(),
                 PersistMessagesMiddleware(database, session_id),
