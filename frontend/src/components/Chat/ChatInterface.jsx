@@ -1,17 +1,14 @@
-import { useState, useEffect, Fragment, useRef } from 'react';
-import { doc, getDoc, setDoc, updateDoc, deleteField, collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Dialog, Transition } from '@headlessui/react';
 import { useAuth } from '../../context/AuthContext';
+import { apiRequest } from '../../lib/api';
 import ChatHistory from './ChatHistory';
 import MarkdownRenderer from './MarkdownRenderer';
-import { Dialog, Transition } from '@headlessui/react';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-
-const createClientSessionId = () => {
+const createClientMessageId = () => {
   const uuid = globalThis.crypto?.randomUUID?.();
   if (uuid) return uuid;
-  return `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `message-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
 const deriveSessionTitle = (text) => {
@@ -21,81 +18,17 @@ const deriveSessionTitle = (text) => {
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
 };
 
-const extractTextFromContent = (content) => {
-  if (typeof content === 'string') {
-    return content;
-  }
-
-  if (Array.isArray(content)) {
-    return content
-      .map((item) => {
-        if (typeof item === 'string') return item;
-        if (!item || typeof item !== 'object') return '';
-        if (item.type === 'text' && typeof item.text === 'string') return item.text;
-        return extractTextFromContent(item);
-      })
-      .filter((text) => typeof text === 'string' && text.trim())
-      .join('\n');
-  }
-
-  if (!content || typeof content !== 'object') {
-    return '';
-  }
-
-  if (typeof content.text === 'string') {
-    return content.text;
-  }
-
-  if (typeof content.content === 'string') {
-    return content.content;
-  }
-
-  if (Array.isArray(content.content)) {
-    return extractTextFromContent(content.content);
-  }
-
-  if (Array.isArray(content.blocks)) {
-    return extractTextFromContent(content.blocks);
-  }
-
-  try {
-    return JSON.stringify(content, null, 2);
-  } catch {
-    return '';
-  }
-};
-
-const normalizeStoredMessage = (rawMessage, index) => {
-  let parsedMessage = rawMessage;
-  if (typeof rawMessage === 'string') {
-    const trimmed = rawMessage.trim();
-    if (!trimmed) return null;
-    try {
-      parsedMessage = JSON.parse(trimmed);
-    } catch {
-      return null;
-    }
-  }
-
-  if (!parsedMessage || typeof parsedMessage !== 'object') return null;
-
-  const typeToken = String(parsedMessage.type || parsedMessage.role || '').toLowerCase();
-  const isHuman = typeToken.includes('human') || typeToken === 'user';
-  const isAi = typeToken.includes('ai') || typeToken.includes('assistant');
-  if (!isHuman && !isAi) return null;
-
-  const content = parsedMessage.content ?? parsedMessage.data?.content;
-  const text = extractTextFromContent(content).trim();
-  if (!text) return null;
-
-  return {
-    id: `msg-${index}`,
-    text,
-    sender: isHuman ? 'user' : 'ai',
-  };
-};
+const QUICK_PROMPTS = [
+  'Create a 5-point market overview for AI copilots in healthcare.',
+  'Compare top open-source RAG frameworks with practical tradeoffs.',
+  'Build a launch-ready research brief for an AI tutor product.',
+];
 
 const SidebarContent = ({
+  sessions,
+  sessionsLoading,
+  sessionsError,
+  activeSessionId,
   searchTerm,
   setSearchTerm,
   handleNewChat,
@@ -105,92 +38,177 @@ const SidebarContent = ({
   loadChat,
 }) => (
   <>
-    <div className="p-4 border-b border-gray-200">
-      <h1 className="text-xl font-bold text-blue-900">ResearchAI</h1>
-    </div>
-    <div className="p-4 pb-32 overflow-y-scroll no-scrollbar h-full">
-      <div className="mb-4">
-        <input
-          type="text"
-          placeholder="Search chats..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          onTouchStart={(e) => e.stopPropagation()}
-          className="w-full p-2 border border-gray-300 rounded text-sm"
-        />
-      </div>
-      <div className="space-y-2">
+    <div className="border-b border-blue-100 px-4 pb-4 pt-3">
+      <div className="rounded-2xl border border-blue-100/80 bg-gradient-to-br from-blue-50 via-white to-slate-50 p-4 shadow-sm">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-700">Workspace</p>
+        <h1 className="brand-display mt-1 text-xl font-bold text-blue-900">ResearchAI Chat</h1>
+        <p className="mt-2 text-xs text-slate-500">{sessions.length} sessions available</p>
+
         <button
           onClick={handleNewChat}
-          className="w-full text-left p-2 hover:bg-gray-100 rounded text-sm font-medium hover:text-blue-900"
+          className="mt-4 w-full rounded-xl bg-blue-900 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-800"
         >
-          + New Chat
+          + New chat
         </button>
-        <ChatHistory
-          onChatSelect={loadChat}
-          onDeleteChat={handleDeleteChat}
-          onRenameChat={handleRenameChat}
-          onShareChat={handleShareChat}
-          searchTerm={searchTerm}
+      </div>
+
+      <div className="mt-3 relative">
+        <svg
+          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" />
+        </svg>
+        <input
+          type="text"
+          placeholder="Search sessions"
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+          className="w-full rounded-xl border border-blue-100 bg-white px-9 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
         />
       </div>
+    </div>
+
+    <div className="flex-1 overflow-y-auto no-scrollbar px-3 pb-6 pt-3">
+      <ChatHistory
+        sessions={sessions}
+        loading={sessionsLoading}
+        error={sessionsError}
+        activeSessionId={activeSessionId}
+        onChatSelect={loadChat}
+        onDeleteChat={handleDeleteChat}
+        onRenameChat={handleRenameChat}
+        onShareChat={handleShareChat}
+        searchTerm={searchTerm}
+      />
     </div>
   </>
 );
 
+function MessageBubble({ msg }) {
+  if (msg.status === 'pending') {
+    return (
+      <div className="max-w-full rounded-2xl border border-blue-200 bg-white px-4 py-3 shadow-sm md:max-w-[78%]">
+        <div className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full bg-blue-900 animate-bounce [animation-delay:-0.2s]" />
+          <span className="h-2 w-2 rounded-full bg-blue-900 animate-bounce [animation-delay:-0.1s]" />
+          <span className="h-2 w-2 rounded-full bg-blue-900 animate-bounce" />
+        </div>
+      </div>
+    );
+  }
+
+  const isUser = msg.sender === 'user';
+  const isAssistant = msg.sender === 'ai';
+  const isError = msg.sender === 'ai-error' || msg.sender === 'system-error';
+
+  return (
+    <div
+      className={`max-w-full overflow-hidden rounded-2xl shadow-sm md:max-w-[78%] ${
+        isUser
+          ? 'bg-blue-900 px-4 py-3 text-white'
+          : isAssistant
+            ? 'border border-blue-100 bg-white text-slate-800'
+            : 'border border-red-200 bg-red-50 px-4 py-3 text-red-700'
+      }`}
+    >
+      {isAssistant || isError ? (
+        <MarkdownRenderer content={msg.text} />
+      ) : (
+        <div className="whitespace-pre-wrap leading-6">{msg.text}</div>
+      )}
+    </div>
+  );
+}
+
 export default function ChatInterface() {
   const { currentUser } = useAuth();
+
+  const [sessions, setSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionsError, setSessionsError] = useState('');
+
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [isGeneratingResponse, setIsGeneratingResponse] = useState(false);
-  const [sessionTitle, setSessionTitle] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
+  const [sessionTitle, setSessionTitle] = useState('');
+
+  const [input, setInput] = useState('');
+  const [isGeneratingResponse, setIsGeneratingResponse] = useState(false);
+
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [renameSessionId, setRenameSessionId] = useState(null);
   const [renameValue, setRenameValue] = useState('');
   const [renameLoading, setRenameLoading] = useState(false);
   const [renameError, setRenameError] = useState('');
+
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [shareSessionId, setShareSessionId] = useState(null);
   const [shareSessionTitle, setShareSessionTitle] = useState('');
   const [shareEmail, setShareEmail] = useState('');
   const [shareLoading, setShareLoading] = useState(false);
   const [shareError, setShareError] = useState('');
+
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [searchTerm, setSearchTerm] = useState('');
-  const sessionIdRef = useRef(null);
-  const sessionTitleRef = useRef('');
+
+  const sessionIdRef = useRef(sessionId);
   const isGeneratingRef = useRef(false);
+  const composerRef = useRef(null);
 
-  useEffect(() => {
-    const saveChatSession = async () => {
-      if (!currentUser || !sessionId) return;
+  const applySessionTitleFromList = useCallback((allSessions, targetSessionId) => {
+    if (!targetSessionId) return;
+    const matched = allSessions.find((item) => item.id === targetSessionId);
+    if (matched && matched.topic) {
+      setSessionTitle(matched.topic);
+    }
+  }, []);
 
-      const userChatsRef = doc(db, 'user_chats', currentUser.uid);
-      await setDoc(userChatsRef, {
-        sessions: {
-          [sessionId]: {
-            topic: sessionTitle || 'Untitled Session',
-            createdAt: new Date(),
-          },
-        },
-      }, { merge: true });
-    };
-
-    saveChatSession();
-  }, [sessionId, currentUser, sessionTitle]);
+  const loadSessions = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!silent) setSessionsLoading(true);
+      try {
+        const payload = await apiRequest('/chat/sessions', { method: 'GET' });
+        const loadedSessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+        setSessions(loadedSessions);
+        setSessionsError('');
+        applySessionTitleFromList(loadedSessions, sessionIdRef.current);
+      } catch (error) {
+        console.error('Error loading sessions:', error);
+        setSessionsError(error.message || 'Failed to load chat history');
+      } finally {
+        if (!silent) setSessionsLoading(false);
+      }
+    },
+    [applySessionTitleFromList]
+  );
 
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
 
   useEffect(() => {
-    sessionTitleRef.current = sessionTitle;
-  }, [sessionTitle]);
+    if (!currentUser) return;
+    loadSessions();
+  }, [currentUser, loadSessions]);
+
+  const resizeComposer = useCallback(() => {
+    const textarea = composerRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    const maxHeight = 180;
+    const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, []);
+
+  useEffect(() => {
+    resizeComposer();
+  }, [input, resizeComposer]);
 
   const handleNewChat = () => {
     setMessages([]);
@@ -198,7 +216,6 @@ export default function ChatInterface() {
     setSessionTitle('');
     setSessionId(null);
     sessionIdRef.current = null;
-    sessionTitleRef.current = '';
     setIsRenameModalOpen(false);
     setRenameSessionId(null);
     setRenameValue('');
@@ -221,9 +238,9 @@ export default function ChatInterface() {
     setRenameError('');
   };
 
-  const handleRenameSubmit = async (e) => {
-    e.preventDefault();
-    if (!currentUser || !renameSessionId) return;
+  const handleRenameSubmit = async (event) => {
+    event.preventDefault();
+    if (!renameSessionId) return;
 
     const nextTitle = renameValue.trim();
     if (!nextTitle) {
@@ -234,23 +251,18 @@ export default function ChatInterface() {
     setRenameLoading(true);
     setRenameError('');
     try {
-      const userChatsRef = doc(db, 'user_chats', currentUser.uid);
-      const userChatsSnap = await getDoc(userChatsRef);
-      const sessions = userChatsSnap.exists() ? (userChatsSnap.data().sessions || {}) : {};
-      const existing = sessions[renameSessionId] || {};
+      const payload = await apiRequest(`/chat/sessions/${renameSessionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ topic: nextTitle }),
+      });
 
-      await setDoc(userChatsRef, {
-        sessions: {
-          [renameSessionId]: {
-            ...existing,
-            topic: nextTitle,
-            createdAt: existing.createdAt || new Date(),
-          },
-        },
-      }, { merge: true });
-
-      if (renameSessionId === sessionId) {
-        sessionTitleRef.current = nextTitle;
+      const updated = payload?.session;
+      if (updated) {
+        setSessions((prev) =>
+          prev.map((session) => (session.id === updated.id ? { ...session, ...updated } : session))
+        );
+      }
+      if (renameSessionId === sessionIdRef.current) {
         setSessionTitle(nextTitle);
       }
       closeRenameModal();
@@ -263,22 +275,20 @@ export default function ChatInterface() {
   };
 
   const handleDeleteChat = async (targetSessionId, targetTitle = 'Untitled Session') => {
-    if (!currentUser || !targetSessionId) return;
-
+    if (!targetSessionId) return;
     const shouldDelete = window.confirm(`Delete chat "${targetTitle}"?`);
     if (!shouldDelete) return;
 
     try {
-      const userChatsRef = doc(db, 'user_chats', currentUser.uid);
-      await updateDoc(userChatsRef, {
-        [`sessions.${targetSessionId}`]: deleteField(),
-      });
+      await apiRequest(`/chat/sessions/${targetSessionId}`, { method: 'DELETE' });
+      setSessions((prev) => prev.filter((session) => session.id !== targetSessionId));
 
-      if (targetSessionId === sessionId) {
+      if (targetSessionId === sessionIdRef.current) {
         handleNewChat();
       }
     } catch (error) {
       console.error('Error deleting chat:', error);
+      setSessionsError(error.message || 'Failed to delete chat');
     }
   };
 
@@ -298,188 +308,129 @@ export default function ChatInterface() {
     setShareSessionTitle('');
   };
 
-  const handleSend = async (e) => {
-    e.preventDefault();
+  const loadChat = async (selectedSessionId) => {
+    if (!selectedSessionId) return;
+
+    try {
+      setChatLoading(true);
+      setMessages([]);
+      const payload = await apiRequest(`/chat/sessions/${selectedSessionId}/messages`, {
+        method: 'GET',
+      });
+      const loadedMessages = Array.isArray(payload?.messages) ? payload.messages : [];
+      setMessages(loadedMessages);
+      setSessionId(selectedSessionId);
+      sessionIdRef.current = selectedSessionId;
+      applySessionTitleFromList(sessions, selectedSessionId);
+
+      if (window.innerWidth < 768) {
+        setIsSidebarOpen(false);
+      }
+    } catch (error) {
+      console.error('Error loading chat:', error);
+      setMessages([{ id: 'system-error', text: 'Failed to load chat history.', sender: 'ai-error' }]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  const handleSend = async (event) => {
+    event.preventDefault();
     const messageText = input.trim();
-    if (!messageText || loading || isGeneratingRef.current) return;
+    if (!messageText || isGeneratingRef.current) return;
 
     isGeneratingRef.current = true;
     setIsGeneratingResponse(true);
 
-    let activeSessionId = sessionIdRef.current;
-    if (!activeSessionId) {
-      activeSessionId = createClientSessionId();
-      sessionIdRef.current = activeSessionId;
-      setSessionId(activeSessionId);
-    }
-
-    let nextSessionTitle = sessionTitleRef.current;
-    if (!nextSessionTitle) {
-      nextSessionTitle = deriveSessionTitle(messageText);
-      sessionTitleRef.current = nextSessionTitle;
-      setSessionTitle(nextSessionTitle);
-    }
-
-    const pendingMessageId = `pending-${createClientSessionId()}`;
+    const pendingMessageId = `pending-${createClientMessageId()}`;
     setMessages((prev) => [
       ...prev,
-      { id: `user-${createClientSessionId()}`, text: messageText, sender: 'user' },
+      { id: `user-${createClientMessageId()}`, text: messageText, sender: 'user' },
       { id: pendingMessageId, text: '', sender: 'ai', status: 'pending' },
     ]);
     setInput('');
 
+    if (!sessionTitle) {
+      setSessionTitle(deriveSessionTitle(messageText));
+    }
+
     try {
-      const response = await fetch(`${API_BASE_URL}/chat`, {
+      const payload = await apiRequest('/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           user_input: messageText,
-          session_id: activeSessionId,
+          session_id: sessionIdRef.current,
         }),
       });
 
-      if (!response.ok) throw new Error('Chat request failed');
+      const returnedSessionId = String(payload?.session_id || '').trim();
+      const responseText = String(payload?.response || '').trim();
+      if (!responseText) {
+        throw new Error('Empty response from backend');
+      }
 
-      const data = await response.json();
-      const responseText = String(data.response || '').trim();
-      if (!responseText) throw new Error('Empty response from backend');
+      if (returnedSessionId) {
+        setSessionId(returnedSessionId);
+        sessionIdRef.current = returnedSessionId;
+      }
 
-      setMessages((prev) => prev.map((message) => (
-        message.id === pendingMessageId
-          ? { ...message, text: responseText, sender: 'ai', status: 'done' }
-          : message
-      )));
-    } catch (err) {
-      console.error('Error sending message:', err);
-      setMessages((prev) => prev.map((message) => (
-        message.id === pendingMessageId
-          ? { ...message, text: "Sorry, I couldn't process your request.", sender: 'ai-error', status: 'error' }
-          : message
-      )));
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === pendingMessageId
+            ? { ...message, text: responseText, sender: 'ai', status: 'done' }
+            : message
+        )
+      );
+      await loadSessions({ silent: true });
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === pendingMessageId
+            ? {
+                ...message,
+                text: "Sorry, I couldn't process your request.",
+                sender: 'ai-error',
+                status: 'error',
+              }
+            : message
+        )
+      );
     } finally {
       isGeneratingRef.current = false;
       setIsGeneratingResponse(false);
     }
   };
 
-  const loadChat = async (selectedSessionId) => {
-    try {
-      setLoading(true);
-      setMessages([]);
+  const handleComposerKeyDown = (event) => {
+    if (event.key !== 'Enter') return;
+    if (event.shiftKey) return;
 
-      const userChatsRef = doc(db, 'user_chats', currentUser.uid);
-      const userChatsSnap = await getDoc(userChatsRef);
-      if (!userChatsSnap.exists()) throw new Error('No chat sessions found');
-
-      const sessions = userChatsSnap.data().sessions || {};
-      const rawSessionData = sessions[selectedSessionId];
-      const resolvedSessionTitle = rawSessionData?.topic || 'Untitled Session';
-
-      const sessionRef = doc(db, 'chats', selectedSessionId);
-      const sessionSnap = await getDoc(sessionRef);
-      if (!sessionSnap.exists()) throw new Error('Chat session not found');
-
-      const messagesData = sessionSnap.data().messages || [];
-      const processedMessages = messagesData
-        .map((msg, index) => normalizeStoredMessage(msg, index))
-        .filter((msg) => msg !== null);
-
-      setSessionId(selectedSessionId);
-      setSessionTitle(resolvedSessionTitle);
-      sessionIdRef.current = selectedSessionId;
-      sessionTitleRef.current = resolvedSessionTitle;
-      setMessages(processedMessages);
-    } catch (error) {
-      console.error('Error loading chat:', error);
-      setMessages([{
-        text: 'Failed to load chat history. Please try again.',
-        sender: 'system-error',
-      }]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const Message = ({ msg }) => {
-    if (msg.status === 'pending') {
-      return (
-        <div className="max-w-full md:max-w-[75%] p-3 rounded-lg bg-white border border-gray-200">
-          <div className="flex items-center gap-1 text-gray-600">
-            <span className="h-2 w-2 rounded-full bg-blue-500 animate-bounce [animation-delay:-0.2s]" />
-            <span className="h-2 w-2 rounded-full bg-blue-500 animate-bounce [animation-delay:-0.1s]" />
-            <span className="h-2 w-2 rounded-full bg-blue-500 animate-bounce" />
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div
-        className={`max-w-full md:max-w-[75%] p-3 rounded-lg ${
-          msg.sender === 'user'
-            ? 'bg-blue-900 text-white'
-            : msg.sender === 'ai'
-            ? 'bg-white border border-gray-200'
-            : msg.sender === 'system-error'
-            ? 'bg-red-100 border border-red-200 text-red-700'
-            : 'bg-gray-100 border border-gray-200'
-        }`}
-      >
-        {msg.sender === 'ai' || msg.sender === 'ai-error' ? (
-          <MarkdownRenderer content={msg.text} />
-        ) : (
-          <div className="whitespace-pre-wrap">{msg.text}</div>
-        )}
-      </div>
-    );
+    event.preventDefault();
+    if (chatLoading || isGeneratingResponse || !input.trim()) return;
+    event.currentTarget.form?.requestSubmit();
   };
 
   const handleShareClick = () => {
-    if (!sessionId) return;
-    handleShareChat(sessionId, sessionTitle || 'Untitled Session');
+    if (!sessionIdRef.current) return;
+    handleShareChat(sessionIdRef.current, sessionTitle || 'Untitled Session');
   };
 
-  const handleShareSubmit = async (e) => {
-    e.preventDefault();
+  const handleShareSubmit = async (event) => {
+    event.preventDefault();
     setShareLoading(true);
     setShareError('');
 
     try {
-      const targetSessionId = shareSessionId || sessionId;
-      const targetSessionTitle = shareSessionTitle || sessionTitle || 'Untitled Session';
+      const targetSessionId = shareSessionId || sessionIdRef.current;
       if (!targetSessionId) {
         throw new Error('No chat selected to share');
       }
-
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('email', '==', shareEmail));
-      const querySnapshot = await getDocs(q);
-
-      if (querySnapshot.empty) {
-        throw new Error('User not found');
-      }
-
-      const userDoc = querySnapshot.docs[0];
-      const targetUserId = userDoc.id;
-
-      const targetUserChatsRef = doc(db, 'user_chats', targetUserId);
-      await setDoc(targetUserChatsRef, {
-        sessions: {
-          [targetSessionId]: {
-            topic: targetSessionTitle,
-            createdAt: new Date(),
-            sharedBy: currentUser.email,
-            isShared: true,
-          },
-        },
-      }, { merge: true });
-
-      setIsShareModalOpen(false);
-      setShareEmail('');
-      setShareSessionId(null);
-      setShareSessionTitle('');
+      await apiRequest(`/chat/sessions/${targetSessionId}/share`, {
+        method: 'POST',
+        body: JSON.stringify({ email: shareEmail.trim() }),
+      });
+      closeShareModal();
     } catch (error) {
       console.error('Sharing error:', error);
       setShareError(error.message || 'Failed to share chat');
@@ -489,67 +440,66 @@ export default function ChatInterface() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-100 overflow-x-hidden">
+    <div className="relative flex h-screen overflow-hidden bg-gradient-to-b from-slate-50 via-blue-50/40 to-slate-100">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-24 right-0 h-72 w-72 rounded-full bg-blue-200/20 blur-3xl" />
+        <div className="absolute -left-16 bottom-10 h-64 w-64 rounded-full bg-blue-900/10 blur-3xl" />
+      </div>
+
       <Transition appear show={isRenameModalOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-10" onClose={closeRenameModal}>
+        <Dialog as="div" className="relative z-30" onClose={closeRenameModal}>
           <Transition.Child
             as={Fragment}
-            enter="ease-out duration-300"
+            enter="ease-out duration-200"
             enterFrom="opacity-0"
             enterTo="opacity-100"
-            leave="ease-in duration-200"
+            leave="ease-in duration-150"
             leaveFrom="opacity-100"
             leaveTo="opacity-0"
           >
-            <div className="fixed inset-0 bg-opacity-25" />
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" />
           </Transition.Child>
 
           <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center p-4 text-center">
+            <div className="flex min-h-full items-center justify-center p-4">
               <Transition.Child
                 as={Fragment}
-                enter="ease-out duration-300"
+                enter="ease-out duration-200"
                 enterFrom="opacity-0 scale-95"
                 enterTo="opacity-100 scale-100"
-                leave="ease-in duration-200"
+                leave="ease-in duration-150"
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-xl transition-all">
-                  <Dialog.Title className="text-lg font-medium leading-6 text-gray-900">
-                    Rename Chat Session
-                  </Dialog.Title>
+                <Dialog.Panel className="w-full max-w-md overflow-hidden rounded-2xl border border-blue-100 bg-white p-6 shadow-xl">
+                  <Dialog.Title className="text-lg font-semibold text-blue-900">Rename Chat Session</Dialog.Title>
 
                   <form onSubmit={handleRenameSubmit} className="mt-4 space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">
-                        Chat Name
-                      </label>
+                      <label className="block text-sm font-medium text-slate-700">Chat Name</label>
                       <input
                         type="text"
                         required
                         value={renameValue}
-                        onChange={(e) => setRenameValue(e.target.value)}
-                        className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                        onChange={(event) => setRenameValue(event.target.value)}
+                        className="mt-1 block w-full rounded-lg border border-blue-100 px-3 py-2 text-sm shadow-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
                       />
                     </div>
 
-                    {renameError && (
-                      <p className="text-red-500 text-sm">{renameError}</p>
-                    )}
+                    {renameError && <p className="text-sm text-red-500">{renameError}</p>}
 
-                    <div className="flex justify-end space-x-4">
+                    <div className="flex justify-end gap-3">
                       <button
                         type="button"
                         onClick={closeRenameModal}
-                        className="inline-flex justify-center rounded-md border border-transparent bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none"
+                        className="rounded-lg border border-blue-100 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50"
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
                         disabled={renameLoading || !renameValue.trim()}
-                        className="inline-flex justify-center rounded-md border border-transparent bg-blue-900 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none disabled:opacity-50"
+                        className="rounded-lg bg-blue-900 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50"
                       >
                         {renameLoading ? 'Renaming...' : 'Rename'}
                       </button>
@@ -563,65 +513,62 @@ export default function ChatInterface() {
       </Transition>
 
       <Transition appear show={isShareModalOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-10" onClose={closeShareModal}>
+        <Dialog as="div" className="relative z-30" onClose={closeShareModal}>
           <Transition.Child
             as={Fragment}
-            enter="ease-out duration-300"
+            enter="ease-out duration-200"
             enterFrom="opacity-0"
             enterTo="opacity-100"
-            leave="ease-in duration-200"
+            leave="ease-in duration-150"
             leaveFrom="opacity-100"
             leaveTo="opacity-0"
           >
-            <div className="fixed inset-0 bg-opacity-25" />
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" />
           </Transition.Child>
 
           <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center p-4 text-center">
+            <div className="flex min-h-full items-center justify-center p-4">
               <Transition.Child
                 as={Fragment}
-                enter="ease-out duration-300"
+                enter="ease-out duration-200"
                 enterFrom="opacity-0 scale-95"
                 enterTo="opacity-100 scale-100"
-                leave="ease-in duration-200"
+                leave="ease-in duration-150"
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-xl transition-all">
-                  <Dialog.Title className="text-lg font-medium leading-6 text-gray-900">
-                    Share Chat Session
-                  </Dialog.Title>
+                <Dialog.Panel className="w-full max-w-md overflow-hidden rounded-2xl border border-blue-100 bg-white p-6 shadow-xl">
+                  <Dialog.Title className="text-lg font-semibold text-blue-900">Share Chat Session</Dialog.Title>
+                  {shareSessionTitle && (
+                    <p className="mt-1 text-sm text-slate-500">Sharing: {shareSessionTitle}</p>
+                  )}
 
                   <form onSubmit={handleShareSubmit} className="mt-4 space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">
-                        Recipient Email
-                      </label>
+                      <label className="block text-sm font-medium text-slate-700">Recipient Email</label>
                       <input
                         type="email"
                         required
                         value={shareEmail}
-                        onChange={(e) => setShareEmail(e.target.value)}
-                        className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                        onChange={(event) => setShareEmail(event.target.value)}
+                        className="mt-1 block w-full rounded-lg border border-blue-100 px-3 py-2 text-sm shadow-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
                       />
                     </div>
 
-                    {shareError && (
-                      <p className="text-red-500 text-sm">{shareError}</p>
-                    )}
+                    {shareError && <p className="text-sm text-red-500">{shareError}</p>}
 
-                    <div className="flex justify-end space-x-4">
+                    <div className="flex justify-end gap-3">
                       <button
                         type="button"
                         onClick={closeShareModal}
-                        className="inline-flex justify-center rounded-md border border-transparent bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none"
+                        className="rounded-lg border border-blue-100 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50"
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
-                        disabled={shareLoading}
-                        className="inline-flex justify-center rounded-md border border-transparent bg-blue-900 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none disabled:opacity-50"
+                        disabled={shareLoading || !shareEmail.trim()}
+                        className="rounded-lg bg-blue-900 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50"
                       >
                         {shareLoading ? 'Sharing...' : 'Share'}
                       </button>
@@ -634,15 +581,21 @@ export default function ChatInterface() {
         </Dialog>
       </Transition>
 
-      <div className={`fixed inset-0 z-40 flex md:hidden ${isSidebarOpen ? '' : 'pointer-events-none'}`}>
+      <div className={`fixed inset-0 z-30 flex md:hidden ${isSidebarOpen ? '' : 'pointer-events-none'}`}>
         <div
-          className={`fixed inset-0 bg-opacity-25 transition-opacity ${isSidebarOpen ? 'opacity-100' : 'opacity-0'}`}
+          className={`fixed inset-0 bg-slate-900/35 transition-opacity ${isSidebarOpen ? 'opacity-100' : 'opacity-0'}`}
           onClick={() => setIsSidebarOpen(false)}
         />
         <div
-          className={`relative w-64 bg-white border-r border-gray-200 transform transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
+          className={`relative flex w-80 max-w-[86%] flex-col border-r border-blue-100 bg-white/95 backdrop-blur-md transition-transform ${
+            isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
         >
           <SidebarContent
+            sessions={sessions}
+            sessionsLoading={sessionsLoading}
+            sessionsError={sessionsError}
+            activeSessionId={sessionId}
             searchTerm={searchTerm}
             setSearchTerm={setSearchTerm}
             handleNewChat={handleNewChat}
@@ -654,11 +607,17 @@ export default function ChatInterface() {
         </div>
       </div>
 
-      <div
-        className={`hidden md:flex md:flex-col bg-white border-r border-gray-200 pt-16 transition-all duration-300 ${isSidebarOpen ? 'md:w-64' : 'md:w-0 md:overflow-hidden'}`}
+      <aside
+        className={`hidden border-r border-blue-100 bg-white/90 pt-16 backdrop-blur-md transition-all duration-300 md:flex md:flex-col ${
+          isSidebarOpen ? 'w-[20rem]' : 'w-0 overflow-hidden border-r-0'
+        }`}
       >
         {isSidebarOpen && (
           <SidebarContent
+            sessions={sessions}
+            sessionsLoading={sessionsLoading}
+            sessionsError={sessionsError}
+            activeSessionId={sessionId}
             searchTerm={searchTerm}
             setSearchTerm={setSearchTerm}
             handleNewChat={handleNewChat}
@@ -668,91 +627,168 @@ export default function ChatInterface() {
             loadChat={loadChat}
           />
         )}
-      </div>
+      </aside>
 
-      <div className="flex-1 flex flex-col pt-16">
-        <div className="p-4 border-b border-gray-200 bg-white flex items-center justify-between">
-          <div className="flex items-center">
-            <button
-              className="md:hidden mr-2"
-              onClick={() => setIsSidebarOpen(true)}
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path>
-              </svg>
-            </button>
-            <button
-              className="hidden md:block mr-2"
-              onClick={() => setIsSidebarOpen((v) => !v)}
-            >
-              <svg
-                className="w-6 h-6"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
+      <main className="relative flex min-w-0 flex-1 flex-col pt-16">
+        <header className="border-b border-blue-100/90 bg-white/75 px-4 py-3 backdrop-blur-md md:px-6">
+          <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <button
+                className="rounded-lg p-1.5 text-slate-600 transition hover:bg-blue-50 hover:text-blue-900 md:hidden"
+                onClick={() => setIsSidebarOpen(true)}
+                aria-label="Open sidebar"
               >
-                {isSidebarOpen ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 12L6 6V18Z" />
-                ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 6h12M6 12h12M6 18h12" />
-                )}
-              </svg>
-            </button>
-            <h2 className="text-lg font-semibold text-blue-900">
-              {sessionId ? `Chat: ${sessionTitle || 'Untitled Session'}` : 'New Chat'}
-            </h2>
-          </div>
-          {sessionId && (
-            <button
-              onClick={handleShareClick}
-              className="px-3 py-1 text-sm bg-blue-900 text-white rounded hover:bg-blue-700"
-            >
-              Share
-            </button>
-          )}
-        </div>
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-24">
-          {messages.length === 0 ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <h3 className="text-xl font-medium">Start a New Chat</h3>
-                <p className="text-gray-600 text-sm">Describe your research request in the message box below.</p>
+              <button
+                className="hidden rounded-lg p-1.5 text-slate-600 transition hover:bg-blue-50 hover:text-blue-900 md:block"
+                onClick={() => setIsSidebarOpen((value) => !value)}
+                aria-label="Toggle sidebar"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {isSidebarOpen ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 6l-6 6 6 6" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 6l6 6-6 6" />
+                  )}
+                </svg>
+              </button>
+
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-700">
+                  {sessionId ? 'Active Session' : 'New Session'}
+                </p>
+                <h2 className="truncate text-lg font-semibold text-slate-900 md:text-xl">
+                  {sessionId ? sessionTitle || 'Untitled Session' : 'Start a new conversation'}
+                </h2>
               </div>
             </div>
-          ) : (
-            messages.map((msg, index) => (
-              <div
-                key={msg.id || index}
-                className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                <Message msg={msg} />
-              </div>
-            ))
-          )}
-        </div>
 
-        <div className="sticky bottom-0 p-4 border-t border-gray-200 bg-white">
-          <form onSubmit={handleSend} className="flex gap-2">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={sessionId ? 'Ask a follow-up question...' : 'Describe what you want to research...'}
-              className="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              disabled={loading || isGeneratingResponse}
-            />
-            <button
-              type="submit"
-              className="px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm"
-              disabled={loading || isGeneratingResponse || !input.trim()}
-            >
-              Send
-            </button>
+            <div className="flex items-center gap-2">
+              {isGeneratingResponse && (
+                <span className="hidden items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 md:inline-flex">
+                  <span className="h-1.5 w-1.5 rounded-full bg-blue-700 animate-pulse" />
+                  Generating
+                </span>
+              )}
+
+              {sessionId && (
+                <button
+                  onClick={handleShareClick}
+                  className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-900 transition hover:bg-blue-50"
+                >
+                  Share
+                </button>
+              )}
+            </div>
+          </div>
+        </header>
+
+        <section className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-7">
+          <div className="mx-auto w-full max-w-5xl">
+            {chatLoading ? (
+              <div className="space-y-4">
+                {[1, 2, 3].map((item) => (
+                  <div key={item} className="animate-pulse rounded-2xl border border-blue-100 bg-white/90 p-4 shadow-sm">
+                    <div className="h-3 w-24 rounded bg-blue-100" />
+                    <div className="mt-3 h-2.5 w-full rounded bg-blue-50" />
+                    <div className="mt-2 h-2.5 w-5/6 rounded bg-blue-50" />
+                  </div>
+                ))}
+              </div>
+            ) : messages.length === 0 ? (
+              <div className="rounded-3xl border border-blue-100 bg-white/90 p-6 shadow-sm md:p-8">
+                <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-900 text-white">
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h8M8 14h5m7 5-4-4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8a4 4 0 0 1-1 2.646Z" />
+                  </svg>
+                </div>
+
+                <h3 className="mt-4 text-2xl font-semibold text-slate-900">What are we researching today?</h3>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                  Ask for market scans, comparative analyses, strategy notes, or deep-dive summaries. I will structure the output as a clean research response.
+                </p>
+
+                <div className="mt-6 grid gap-2">
+                  {QUICK_PROMPTS.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      onClick={() => setInput(prompt)}
+                      className="rounded-xl border border-blue-100 bg-blue-50/50 px-4 py-3 text-left text-sm text-slate-700 transition hover:border-blue-200 hover:bg-blue-50"
+                      disabled={isGeneratingResponse}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="flex w-full flex-col gap-4">
+                {messages.map((msg, index) => {
+                  const isUser = msg.sender === 'user';
+                  const avatarClass = isUser ? 'bg-slate-900 text-white' : 'bg-blue-900 text-white';
+                  const avatarText = isUser ? 'You' : 'AI';
+
+                  return (
+                    <div key={msg.id || index} className={`flex items-start gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
+                      {!isUser && (
+                        <div className={`mt-1 hidden h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold md:flex ${avatarClass}`}>
+                          {avatarText}
+                        </div>
+                      )}
+                      <MessageBubble msg={msg} />
+                      {isUser && (
+                        <div className={`mt-1 hidden h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold md:flex ${avatarClass}`}>
+                          {avatarText}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <footer className="border-t border-blue-100/90 bg-white/80 px-4 py-4 backdrop-blur-md md:px-8 md:py-5">
+          <form onSubmit={handleSend} className="mx-auto w-full max-w-5xl">
+            <div className="rounded-2xl border border-blue-100 bg-white p-2 shadow-sm">
+              <div className="flex items-end gap-2">
+                <textarea
+                  ref={composerRef}
+                  rows={1}
+                  wrap="soft"
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={handleComposerKeyDown}
+                  placeholder={sessionId ? 'Ask a follow-up question...' : 'Describe what you want to research...'}
+                  className="max-h-[180px] w-full resize-none rounded-xl border border-transparent bg-transparent px-3 py-2.5 text-sm leading-6 text-slate-800 outline-none focus:border-blue-100 whitespace-pre-wrap break-words"
+                  disabled={chatLoading || isGeneratingResponse}
+                />
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-2 rounded-xl bg-blue-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={chatLoading || isGeneratingResponse || !input.trim()}
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10.5 22 3l-7.5 19-2.8-8.7L3 10.5Z" />
+                  </svg>
+                  Send
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between px-2 pb-1 pt-2 text-[11px] text-slate-500">
+                <span>{isGeneratingResponse ? 'Wait for the current response to finish before sending another message.' : 'Enter to send. Shift+Enter for a new line.'}</span>
+                <span>{sessionId ? 'Session active' : 'New session'}</span>
+              </div>
+            </div>
           </form>
-        </div>
-      </div>
+        </footer>
+      </main>
     </div>
   );
 }
