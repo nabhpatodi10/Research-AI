@@ -1,39 +1,45 @@
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 
 export default function Footer() {
-    return (
-      <footer className="bg-gray-900 text-white py-12">
-        <div className="max-w-6xl mx-auto px-4">
-          <div className="grid md:grid-cols-3 gap-8">
-            <div>
-              <h3 className="text-xl font-bold mb-4">ResearchAI</h3>
-              <p className="text-gray-400">
-                AI-powered research tools to accelerate your academic insights
-              </p>
-            </div>
+  const location = useLocation();
+  const year = new Date().getFullYear();
+  const sectionHref = (sectionId) => (location.pathname === '/' ? `#${sectionId}` : `/#${sectionId}`);
 
-            <div>
-            <h4 className="font-semibold mb-4">Platform</h4>
-            <ul className="space-y-2">
-                <li><Link to="/features" className="text-gray-400 hover:text-white">Features</Link></li>
-                <li><Link to="/how-it-works" className="text-gray-400 hover:text-white">How it works</Link></li>
-                <li><Link to="/feedback" className="text-gray-400 hover:text-white">Feedback</Link></li>
-            </ul>
-            </div>
-            
-            <div>
-              <h4 className="font-semibold mb-4">Account</h4>
-              <ul className="space-y-2">
-                <li><a href="/login" className="text-gray-400 hover:text-white">Log in</a></li>
-                <li><a href="/signup" className="text-gray-400 hover:text-white">Sign up</a></li>
-              </ul>
-            </div>
+  return (
+    <footer className="bg-slate-950 text-white pt-14 pb-10">
+      <div className="max-w-6xl mx-auto px-4">
+        <div className="grid gap-10 md:grid-cols-[1.2fr_0.9fr_0.9fr]">
+          <div>
+            <h3 className="brand-display text-2xl font-bold text-blue-300">ResearchAI</h3>
+            <p className="mt-3 max-w-md text-sm leading-6 text-slate-300">
+              A research-first workspace for discovering sources, synthesizing context, and producing structured outputs with AI assistance.
+            </p>
           </div>
-          
-          <div className="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400">
-            <p>© 2025 ResearchAI. All rights reserved.</p>
+
+          <div>
+            <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-200">Explore</h4>
+            <ul className="mt-4 space-y-2 text-sm">
+              <li><a href={sectionHref('home')} className="text-slate-300 hover:text-white">Home</a></li>
+              <li><a href={sectionHref('features')} className="text-slate-300 hover:text-white">Features</a></li>
+              <li><a href={sectionHref('workflow')} className="text-slate-300 hover:text-white">Workflow</a></li>
+              <li><Link to="/feedback" className="text-slate-300 hover:text-white">Feedback</Link></li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-200">Account</h4>
+            <ul className="mt-4 space-y-2 text-sm">
+              <li><Link to="/login" className="text-slate-300 hover:text-white">Log in</Link></li>
+              <li><Link to="/signup" className="text-slate-300 hover:text-white">Sign up</Link></li>
+              <li><Link to="/chat" className="text-slate-300 hover:text-white">Open chat</Link></li>
+            </ul>
           </div>
         </div>
-      </footer>
-    );
-  }
+
+        <div className="mt-10 border-t border-slate-800 pt-6 text-xs text-slate-400">
+          <p>© {year} ResearchAI. All rights reserved.</p>
+        </div>
+      </div>
+    </footer>
+  );
+}
