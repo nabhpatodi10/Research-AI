@@ -1,8 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { createUserWithEmailAndPassword, signInWithPopup } from 'firebase/auth';
-import { auth, db, googleProvider } from '../../firebase';
-import { doc, setDoc, getDoc, writeBatch } from 'firebase/firestore';
+import { useAuth } from '../../context/AuthContext';
 
 export default function Signup() {
   const [email, setEmail] = useState('');
@@ -10,71 +8,45 @@ export default function Signup() {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const { signup, googleLogin, currentUser } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (currentUser) {
+      navigate('/chat');
+    }
+  }, [currentUser, navigate]);
 
   const handleGoogleSignup = async () => {
     try {
       setLoading(true);
-      const userCredential = await signInWithPopup(auth, googleProvider);
-
-      const batch = writeBatch(db);
-      const userRef = doc(db, 'users', userCredential.user.uid);
-      const userDoc = await getDoc(userRef);
-
-      if (!userDoc.exists()) {
-        batch.set(userRef, {
-          uid: userCredential.user.uid,
-          name: userCredential.user.displayName,
-          email: userCredential.user.email,
-          provider: 'google',
-          createdAt: new Date(),
-          lastLogin: new Date()
-        });
-      } else {
-        batch.update(userRef, {
-          lastLogin: new Date()
-        });
-      }
-
-      await batch.commit();
-      navigate('/chat');
+      setError('');
+      googleLogin();
     } catch (err) {
       console.error('Google signup error:', err);
       setError(err.message || 'Failed to sign up with Google');
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (password.length < 6) {
-      return setError('Password should be at least 6 characters');
+      setError('Password should be at least 6 characters');
+      return;
     }
 
     try {
       setError('');
       setLoading(true);
-      
-      // Create auth user
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      
-      // Create user document in Firestore
-      await setDoc(doc(db, 'users', userCredential.user.uid), {
-        uid: userCredential.user.uid,
-        name,
-        email,
-        provider: 'emailPassword',
-        createdAt: new Date(),
-        lastLogin: new Date()
-      });
-
+      await signup(name, email, password);
       navigate('/chat');
     } catch (err) {
-      setError('Failed to create an account');
-      console.error(err);
+      setError(err.message || 'Failed to create an account');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (
@@ -86,7 +58,7 @@ export default function Signup() {
             Enter your information to create an account
           </p>
         </div>
-        
+
         <button
           onClick={handleGoogleSignup}
           disabled={loading}
@@ -106,7 +78,7 @@ export default function Signup() {
             <span className="px-2 bg-white text-gray-500">OR</span>
           </div>
         </div>
-        
+
         {error && <div className="text-red-500 text-center">{error}</div>}
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
