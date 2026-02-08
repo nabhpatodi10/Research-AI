@@ -1,8 +1,11 @@
 import uuid_utils
+import re
+import traceback
 from fastapi import APIRouter, Depends, HTTPException, Request
+from langchain.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
-from agent import Agent
+from agent import Agent, build_research_handoff_context
 from api.models import (
     ChatMessage,
     ChatMessagesResponse,
@@ -22,6 +25,22 @@ from nodes import Nodes
 
 
 router = APIRouter(tags=["chat"])
+
+RESEARCH_COMMAND_PATTERN = re.compile(r"^\s*/research(?:\s+(?P<topic>[\s\S]*))?$", re.IGNORECASE)
+
+
+def _parse_research_command(user_input: str) -> tuple[bool, str]:
+    matched = RESEARCH_COMMAND_PATTERN.match(user_input or "")
+    if not matched:
+        return False, ""
+    topic = str(matched.group("topic") or "").strip()
+    return True, topic
+
+
+def _resolve_chat_model(request: Request, model_tier: str) -> BaseChatModel:
+    if model_tier == "mini":
+        return request.app.state.chat_model_mini
+    return request.app.state.chat_model
 
 
 @router.get("/chat/sessions", response_model=ChatSessionsResponse)
@@ -114,27 +133,118 @@ async def chat_endpoint(
 ):
     session_id = request_body.session_id or str(uuid_utils.uuid7())
     try:
+        raw_user_input = str(request_body.user_input or "")
+        trimmed_user_input = raw_user_input.strip()
+        is_research_command, command_topic = _parse_research_command(raw_user_input)
+        force_research_requested = bool(request_body.force_research) or is_research_command
+
+        pending_research = False
         if request_body.session_id:
             has_access = await request.app.state.database.user_has_session(current_user.id, session_id)
             if not has_access:
                 raise HTTPException(status_code=403, detail="You do not have access to this chat session.")
+            pending_research = await request.app.state.database.get_user_session_pending_research(
+                current_user.id,
+                session_id,
+            )
+
+        ask_research_topic_only = False
+        force_research_payload: str | None = None
+        should_set_pending_research = False
+        should_clear_pending_research = False
+
+        effective_user_input = trimmed_user_input
+        if pending_research and not force_research_requested:
+            if not trimmed_user_input:
+                raise HTTPException(status_code=400, detail="Please provide a research topic or idea.")
+            effective_user_input = trimmed_user_input
+            handoff_context = await build_research_handoff_context(
+                database=request.app.state.database,
+                session_id=session_id,
+                model=request.app.state.chat_model,
+                additional_user_context=trimmed_user_input,
+            )
+            force_research_payload = handoff_context or trimmed_user_input
+            should_clear_pending_research = True
+        elif force_research_requested:
+            effective_user_input = command_topic if is_research_command else trimmed_user_input
+            if effective_user_input:
+                handoff_context = await build_research_handoff_context(
+                    database=request.app.state.database,
+                    session_id=session_id,
+                    model=request.app.state.chat_model,
+                    additional_user_context=effective_user_input,
+                )
+                force_research_payload = handoff_context or effective_user_input
+                should_clear_pending_research = True
+            elif pending_research:
+                effective_user_input = "/research"
+                ask_research_topic_only = True
+                should_set_pending_research = True
+                should_clear_pending_research = False
+            else:
+                handoff_context = await build_research_handoff_context(
+                    database=request.app.state.database,
+                    session_id=session_id,
+                    model=request.app.state.chat_model,
+                )
+                if handoff_context:
+                    effective_user_input = handoff_context
+                    force_research_payload = handoff_context
+                    should_clear_pending_research = True
+                else:
+                    effective_user_input = "/research"
+                    ask_research_topic_only = True
+                    should_set_pending_research = True
+                    should_clear_pending_research = False
         else:
+            if not trimmed_user_input:
+                raise HTTPException(status_code=400, detail="Message cannot be empty.")
+            effective_user_input = trimmed_user_input
+
+        if not request_body.session_id:
+            title_seed = effective_user_input if effective_user_input != "/research" else "Research Request"
             await request.app.state.database.ensure_user_chat_session(
                 user_id=current_user.id,
                 session_id=session_id,
-                topic=derive_session_title(request_body.user_input),
+                topic=derive_session_title(title_seed),
+            )
+        else:
+            await request.app.state.database.touch_user_session(
+                user_id=current_user.id,
+                session_id=session_id,
+            )
+
+        if should_set_pending_research:
+            await request.app.state.database.set_user_session_pending_research(
+                current_user.id,
+                session_id,
+                True,
+            )
+        elif should_clear_pending_research and request_body.session_id:
+            await request.app.state.database.set_user_session_pending_research(
+                current_user.id,
+                session_id,
+                False,
             )
 
         system_prompt = Nodes().chat_agent()
-        user_message = HumanMessage(content=request_body.user_input)
+        user_message = HumanMessage(content=effective_user_input)
         await request.app.state.database.add_messages(session_id, [user_message])
         state = {"messages": [user_message]}
+        selected_chat_model = _resolve_chat_model(request, request_body.model)
         chat_agent = Agent(
             session_id=session_id,
             database=request.app.state.database,
-            model=request.app.state.chat_model,
+            model=selected_chat_model,
             system_prompt=system_prompt,
             browser=request.app.state.browser,
+            model_tier=request_body.model,
+            research_breadth=request_body.research_breadth,
+            research_depth=request_body.research_depth,
+            document_length=request_body.document_length,
+            force_research_payload=force_research_payload,
+            ask_research_topic_only=ask_research_topic_only,
         )
         result = await chat_agent.graph.ainvoke(state)
         final_document = result.get("final_document")
@@ -149,5 +259,6 @@ async def chat_endpoint(
     except HTTPException:
         raise
     except Exception as error:
-        print(error)
-        raise HTTPException(status_code=500, detail=str(error))
+        print(f"/chat internal error: {error}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error.")
