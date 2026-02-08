@@ -67,11 +67,16 @@ class ContentSection(BaseModel):
 
     @property
     def as_str(self) -> str:
-        citations = "\n".join([f" [{i}] {cit}" for i, cit in enumerate(self.citations)])
-        return (
-            f"## {self.section_title}\n\n{self.content}".strip().strip("#").strip("#").strip()
-            + f"\n\n{citations}".strip()
-        )
+        citations = [
+            str(citation).strip()
+            for citation in (self.citations or [])
+            if str(citation).strip()
+        ]
+        citation_block = "\n".join([f"[{i}] {cit}" for i, cit in enumerate(citations, start=1)])
+        body = f"## {self.section_title}\n\n{self.content}".strip().strip("#").strip("#").strip()
+        if not citation_block:
+            return body
+        return f"{body}\n\n{citation_block}".strip()
 
 class CompleteDocument(BaseModel):
     title: str = Field(title="Title of the document")
@@ -82,12 +87,29 @@ class CompleteDocument(BaseModel):
 
     @property
     def as_str(self) -> str:
-        references = [].extend(section.citations for section in self.sections)
-        references = list(set(references))
-        references = "\n".join([f" [{i}] {cit}" for i, cit in enumerate(references)])
-        sections = [f"## {section.section_title}\n\n{section.content}".strip() for section in self.sections]
-        sections = "\n\n".join(sections)
-        return f"# {self.title}\n\n{sections}\n\n## References\n{references}".strip()
+        sections = [
+            f"## {section.section_title}\n\n{section.content}".strip()
+            for section in (self.sections or [])
+        ]
+        sections_block = "\n\n".join(sections).strip() or "No sections generated."
+
+        references: list[str] = []
+        seen: set[str] = set()
+        for section in (self.sections or []):
+            for citation in (section.citations or []):
+                citation_text = str(citation).strip()
+                if not citation_text or citation_text in seen:
+                    continue
+                seen.add(citation_text)
+                references.append(citation_text)
+
+        references_block = (
+            "\n".join([f"[{i}] {citation}" for i, citation in enumerate(references, start=1)])
+            if references
+            else "No references provided."
+        )
+
+        return f"# {self.title}\n\n{sections_block}\n\n## References\n{references_block}".strip()
     
 class AgentState(TypedDict):
     messages: Annotated[List[AnyMessage], operator.add]
