@@ -121,6 +121,19 @@ class ChatHistoryMiddleware(AgentMiddleware[AgentExecutionState, Any]):
         state = request.state or {}
         chat_history = state.get("chat_history", [])
         if chat_history:
+            latest_history_message = chat_history[-1]
+            first_runtime_human = next(
+                (message for message in request.messages if isinstance(message, HumanMessage)),
+                None,
+            )
+            if (
+                isinstance(latest_history_message, HumanMessage)
+                and isinstance(first_runtime_human, HumanMessage)
+                and _message_text(latest_history_message) == _message_text(first_runtime_human)
+            ):
+                chat_history = chat_history[:-1]
+
+        if chat_history:
             request = request.override(messages=[*chat_history, *request.messages])
         return await handler(request)
 
@@ -154,8 +167,14 @@ class PersistMessagesMiddleware(AgentMiddleware[AgentExecutionState, Any]):
 
     async def aafter_agent(self, state: AgentExecutionState, runtime: Any) -> None:
         messages = state.get("messages", [])
-        if messages:
-            await self._database.add_messages(self._session_id, messages)
+        if not messages:
+            return
+
+        persistable_messages = [
+            message for message in messages if not isinstance(message, HumanMessage)
+        ]
+        if persistable_messages:
+            await self._database.add_messages(self._session_id, persistable_messages)
 
 
 def _normalize_system_prompt(
