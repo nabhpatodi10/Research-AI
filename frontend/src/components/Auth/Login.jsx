@@ -1,49 +1,38 @@
-import { signInWithEmailAndPassword, signInWithPopup } from 'firebase/auth';
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { auth, googleProvider, db } from '../../firebase';
-import { doc, setDoc, getDoc, writeBatch } from 'firebase/firestore';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const { login, googleLogin, currentUser } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    if (currentUser) {
+      navigate('/chat');
+    }
+  }, [currentUser, navigate]);
+
+  useEffect(() => {
+    const oauthError = searchParams.get('error');
+    if (!oauthError) return;
+    setError(oauthError.replace(/[:_]/g, ' '));
+  }, [searchParams]);
 
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
-      const userCredential = await signInWithPopup(auth, googleProvider);
-      
-      // Use batch write for atomic operations
-      const batch = writeBatch(db);
-      
-      const userRef = doc(db, 'users', userCredential.user.uid);
-      const userDoc = await getDoc(userRef);
-  
-      if (!userDoc.exists()) {
-        batch.set(userRef, {
-          uid: userCredential.user.uid,
-          name: userCredential.user.displayName,
-          email: userCredential.user.email,
-          provider: 'google',
-          createdAt: new Date(),
-          lastLogin: new Date()
-        });
-      } else {
-        batch.update(userRef, {
-          lastLogin: new Date()
-        });
-      }
-  
-      await batch.commit();
-      navigate('/chat');
+      setError('');
+      googleLogin();
     } catch (err) {
       console.error('Google login error:', err);
       setError(err.message || 'Failed to login with Google');
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleEmailLogin = async (e) => {
@@ -51,19 +40,13 @@ export default function Login() {
     try {
       setError('');
       setLoading(true);
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      
-      // Update last login time
-      await setDoc(doc(db, 'users', userCredential.user.uid), {
-        lastLogin: new Date()
-      }, { merge: true });
-      
+      await login(email, password);
       navigate('/chat');
     } catch (err) {
-      setError('Failed to login');
-      console.error(err);
+      setError(err.message || 'Failed to login');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (
@@ -82,7 +65,7 @@ export default function Login() {
           </svg>
           Continue with Google
         </button>
-        
+
         <div className="relative">
           <div className="absolute inset-0 flex items-center">
             <div className="w-full border-t border-gray-300"></div>
