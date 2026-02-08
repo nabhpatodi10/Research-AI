@@ -34,6 +34,9 @@ async def lifespan(app: FastAPI):
         model="gemini-3-flash-preview",
         thinking_level="minimal",
     )
+    app.state.chat_model_mini = ChatGoogleGenerativeAI(
+        model="models/gemini-flash-latest"
+    )
     app.state.firebase_auth = FirebaseAuthService()
 
     app.state.frontend_base_url = (
@@ -82,4 +85,3 @@ app.include_router(feedback_router)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000, reload=False)
-
