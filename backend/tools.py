@@ -1,6 +1,5 @@
 import asyncio
 from langchain_core.tools import tool, BaseTool
-from langchain_core.messages import HumanMessage
 from langchain_core.documents import Document
 from langchain_google_genai import ChatGoogleGenerativeAI
 from playwright.async_api import Browser
@@ -20,9 +19,79 @@ class Tools:
         self.__model = ChatGoogleGenerativeAI(model = "models/gemini-flash-lite-latest")
         self.__nodes = Nodes()
 
-    async def __get_doc_summary(self, document: Document) -> str:
-        summary = await self.__model.ainvoke(self.__nodes.generate_rolling_summary(document.page_content))
-        return summary.text.strip()
+    async def __scrape_with_timeout(
+        self,
+        url: str,
+        title: str | None,
+        timeout_seconds: float,
+    ) -> Document | None:
+        try:
+            return await asyncio.wait_for(
+                self.__scrape.scrape(url, title),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            print(f"Skipping {url}: scrape exceeded {timeout_seconds:.0f}s.")
+            return None
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            print(f"Skipping {url}: {error}")
+            return None
+
+    async def __get_doc_summary(self, document: Document) -> str | None:
+        if len(document.page_content.split()) < 3000:
+            return document.page_content
+        try:
+            summary = await self.__model.ainvoke(
+                self.__nodes.generate_rolling_summary(document.page_content)
+            )
+        except Exception:
+            return None
+        text = getattr(summary, "text", None)
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+
+        content = getattr(summary, "content", "")
+        if isinstance(content, str):
+            return content.strip()
+
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif (
+                    isinstance(item, dict)
+                    and item.get("type") == "text"
+                    and isinstance(item.get("text"), str)
+                ):
+                    parts.append(item["text"])
+            return "\n".join(parts).strip()
+
+        return str(content).strip()
+
+    @staticmethod
+    def __doc_metadata(document: Document) -> dict:
+        metadata = document.metadata if isinstance(document.metadata, dict) else {}
+        nested_metadata = metadata.get("metadata")
+        if not isinstance(nested_metadata, dict):
+            return metadata
+
+        flattened = dict(nested_metadata)
+        for key, value in metadata.items():
+            if key == "metadata":
+                continue
+            flattened[key] = value
+        return flattened
+
+    def __doc_meta_value(self, document: Document, key: str, default: str = "None") -> str:
+        metadata = self.__doc_metadata(document)
+        value = metadata.get(key)
+        if value is None:
+            return default
+        value_str = str(value).strip()
+        return value_str if value_str else default
 
     async def web_search_tool(self, query: str) -> str:
         """Web Search tool to access documents from the web based on the given search query"""
@@ -31,14 +100,81 @@ class Tools:
             if not __urls:
                 return "No search results found."
 
-            documents = await asyncio.gather(*[self.__scrape.scrape(url, title) for url, title in __urls.items()])
-            documents = [doc for doc in documents if doc is not None and doc.page_content is not None and doc.page_content.strip() != ""]
+            per_url_timeout_seconds = 20.0
+            overall_scrape_timeout_seconds = 20.0
+            min_documents_before_stop = 3
+            max_documents = 5
+
+            scrape_tasks = {
+                asyncio.create_task(
+                    self.__scrape_with_timeout(url, title, per_url_timeout_seconds)
+                ): url
+                for url, title in __urls.items()
+            }
+
+            documents: list[Document] = []
+            seen_sources: set[str] = set()
+            pending = set(scrape_tasks.keys())
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + overall_scrape_timeout_seconds
+
+            while pending and len(documents) < max_documents:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    break
+
+                done, pending = await asyncio.wait(
+                    pending,
+                    timeout=remaining,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not done:
+                    break
+
+                for done_task in done:
+                    try:
+                        doc = done_task.result()
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        continue
+
+                    if (
+                        doc is None
+                        or doc.page_content is None
+                        or not doc.page_content.strip()
+                    ):
+                        continue
+
+                    source = str(doc.metadata.get("source", "") or "")
+                    if source in seen_sources:
+                        continue
+                    seen_sources.add(source)
+                    documents.append(doc)
+
+                    if len(documents) >= max_documents:
+                        break
+
+                if len(documents) >= min_documents_before_stop:
+                    break
+
+            if pending:
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+
             if not documents:
                 return "Search results were found, but no scrapeable page content was extracted."
 
             await self.__database.add_data(self.__session_id, documents)
             summaries = await asyncio.gather(*[self.__get_doc_summary(doc) for doc in documents])
-            return "\n----------------\n".join([f"Title: {doc.metadata.get('title', 'None')}\nContent:{summaries[_]}\nSource: {doc.metadata.get('source', 'None')}" for _, doc in enumerate(documents)])
+            return "\n----------------\n".join(
+                [
+                    f"Title: {self.__doc_meta_value(doc, 'title')}\nContent:{summaries[_]}\nSource: {self.__doc_meta_value(doc, 'source')}"
+                    for _, doc in enumerate(documents)
+                    if summaries[_] is not None
+                ]
+            )
         except Exception as e:
             return f"An error occured: {str(e)}"
     
@@ -48,7 +184,11 @@ class Tools:
             document = await self.__scrape.scrape(url)
             if document is not None and document.page_content is not None and document.page_content.strip() != "":
                 await self.__database.add_data(self.__session_id, [document])
-                return f"Title: {document.metadata.get('title', 'None')}\nContent:{document.page_content}\nSource: {document.metadata.get('source', 'None')}"
+                return (
+                    f"Title: {self.__doc_meta_value(document, 'title')}\n"
+                    f"Content:{document.page_content}\n"
+                    f"Source: {self.__doc_meta_value(document, 'source')}"
+                )
             else:
                 return "No content found at the provided URL."
         except Exception as e:
@@ -58,7 +198,15 @@ class Tools:
         """Vector Store Search tool to access documents from the vector store based on the given search query"""
         try:
             documents = await self.__database.vector_search(session_id=self.__session_id, query=query)
-            return "\n----------------\n".join([f"Title: {doc.metadata.get('title', 'None')}\nContent:{doc.page_content}\nSource: {doc.metadata.get('source', 'None')}" for doc in documents])
+            if not documents:
+                return "No relevant documents found in the vector store."
+
+            return "\n----------------\n".join(
+                [
+                    f"Title: {self.__doc_meta_value(doc, 'title')}\nContent:{doc.page_content}\nSource: {self.__doc_meta_value(doc, 'source')}"
+                    for doc in documents
+                ]
+            )
         except Exception as e:
             return f"An error occured: {str(e)}"
     
