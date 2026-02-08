@@ -12,3 +12,4 @@ Include
 pyvenv.cfg
 ms-playwright/
 index.yaml
+test*.*
