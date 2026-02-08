@@ -6,15 +6,14 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-ENV PLAYWRIGHT_BROWSERS_PATH=./ms-playwright
-ENV PLAYWRIGHT_DOWNLOAD_HOST=https://playwright.azureedge.net
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 RUN python3 -m pip install --upgrade pip
-RUN apt-get update && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt --no-deps
-RUN python -m playwright install --with-deps chromium-headless-shell
+RUN python -m playwright install --with-deps chromium --only-shell
 
 # copy source
 COPY . .
