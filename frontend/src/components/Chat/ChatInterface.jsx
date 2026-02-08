@@ -581,9 +581,9 @@ export default function ChatInterface() {
         </Dialog>
       </Transition>
 
-      <div className={`fixed inset-0 z-30 flex md:hidden ${isSidebarOpen ? '' : 'pointer-events-none'}`}>
+      <div className={`fixed inset-x-0 bottom-0 top-16 z-40 flex md:hidden ${isSidebarOpen ? '' : 'pointer-events-none'}`}>
         <div
-          className={`fixed inset-0 bg-slate-900/35 transition-opacity ${isSidebarOpen ? 'opacity-100' : 'opacity-0'}`}
+          className={`fixed inset-x-0 bottom-0 top-16 bg-slate-900/35 transition-opacity ${isSidebarOpen ? 'opacity-100' : 'opacity-0'}`}
           onClick={() => setIsSidebarOpen(false)}
         />
         <div
@@ -631,7 +631,7 @@ export default function ChatInterface() {
 
       <main className="relative flex min-w-0 flex-1 flex-col pt-16">
         <header className="border-b border-blue-100/90 bg-white/75 px-4 py-3 backdrop-blur-md md:px-6">
-          <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3">
+          <div className="flex w-full items-center justify-between gap-3 md:pl-1">
             <div className="flex min-w-0 items-center gap-2">
               <button
                 className="rounded-lg p-1.5 text-slate-600 transition hover:bg-blue-50 hover:text-blue-900 md:hidden"
