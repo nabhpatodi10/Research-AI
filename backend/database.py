@@ -371,6 +371,7 @@ class Database:
             "createdAt": resolved_created,
             "isShared": bool(existing.get("isShared", False)),
             "sharedBy": existing.get("sharedBy"),
+            "pendingResearch": bool(existing.get("pendingResearch", False)),
         }
         if existing.get("originalOwnerId") is not None:
             payload["originalOwnerId"] = existing.get("originalOwnerId")
@@ -398,6 +399,60 @@ class Database:
         if raw is None:
             return None
         return self._serialize_session(session_id, raw)
+
+    async def get_user_session_pending_research(self, user_id: str, session_id: str) -> bool:
+        return await asyncio.to_thread(self._get_user_session_pending_research_sync, user_id, session_id)
+
+    def _get_user_session_pending_research_sync(self, user_id: str, session_id: str) -> bool:
+        sessions = self._get_user_chats_sessions_sync(user_id)
+        raw = sessions.get(session_id)
+        if not isinstance(raw, dict):
+            return False
+        return bool(raw.get("pendingResearch", False))
+
+    async def set_user_session_pending_research(
+        self,
+        user_id: str,
+        session_id: str,
+        pending: bool,
+    ) -> None:
+        await asyncio.to_thread(self._set_user_session_pending_research_sync, user_id, session_id, pending)
+
+    def _set_user_session_pending_research_sync(
+        self,
+        user_id: str,
+        session_id: str,
+        pending: bool,
+    ) -> None:
+        sessions = self._get_user_chats_sessions_sync(user_id)
+        existing = sessions.get(session_id)
+        if existing is None:
+            return
+
+        payload = dict(existing)
+        payload["pendingResearch"] = bool(pending)
+        payload["createdAt"] = payload.get("createdAt") or datetime.now(timezone.utc)
+        self.__firestore_client.collection("user_chats").document(user_id).set(
+            {"sessions": {session_id: payload}},
+            merge=True,
+        )
+
+    async def touch_user_session(self, user_id: str, session_id: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._touch_user_session_sync, user_id, session_id)
+
+    def _touch_user_session_sync(self, user_id: str, session_id: str) -> dict[str, Any] | None:
+        sessions = self._get_user_chats_sessions_sync(user_id)
+        existing = sessions.get(session_id)
+        if existing is None:
+            return None
+
+        payload = dict(existing)
+        payload["createdAt"] = datetime.now(timezone.utc)
+        self.__firestore_client.collection("user_chats").document(user_id).set(
+            {"sessions": {session_id: payload}},
+            merge=True,
+        )
+        return self._serialize_session(session_id, payload)
 
     async def rename_user_session(
         self, user_id: str, session_id: str, topic: str
@@ -463,6 +518,7 @@ class Database:
             "isShared": True,
             "sharedBy": shared_by_email,
             "originalOwnerId": from_user_id,
+            "pendingResearch": False,
         }
         self.__firestore_client.collection("user_chats").document(to_user_id).set(
             {"sessions": {session_id: payload}},
