@@ -36,6 +36,11 @@ class LogoutResponse(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str | None = None
     user_input: str
+    force_research: bool = False
+    model: Literal["mini", "pro"] = "pro"
+    research_breadth: Literal["low", "medium", "high"] = "medium"
+    research_depth: Literal["low", "high"] = "high"
+    document_length: Literal["low", "medium", "high"] = "high"
 
 
 class ChatResponse(BaseModel):
@@ -86,4 +91,3 @@ class FeedbackRequest(BaseModel):
     feedbackType: str
     satisfaction: str
     comments: str
-
