@@ -270,15 +270,6 @@ For cross-site frontend/backend deployments (for example Vercel + Cloud Run):
 - Set `GOOGLE_OAUTH_REDIRECT_URI` to exact backend callback URL:
   - `https://<backend-domain>/auth/google/callback`
 
-## Testing
-
-Backend tests include async graph orchestration checks:
-
-```bash
-cd backend
-pytest test_graph_async_pipeline.py -q
-```
-
 ## Project Layout
 
 ```text
@@ -307,9 +298,3 @@ pytest test_graph_async_pipeline.py -q
 |  `- vite.config.js
 `- README.md
 ```
-
-## Security Notes
-
-- Do not commit real `.env` values or service-account keys.
-- Rotate any key/secret that has ever been exposed.
-- Keep OAuth redirect URIs and cookie settings environment-specific.
