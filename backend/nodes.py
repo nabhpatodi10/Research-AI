@@ -23,14 +23,15 @@ General operating principles:
 """
         )
     
-    def generate_perspectives(self, outline: str) -> list[AnyMessage]:
+    def generate_perspectives(self, outline: str, count: int = 3) -> list[AnyMessage]:
+        target_count = max(1, int(count))
         messages = [
             SystemMessage(
                 content=f"""You are a professional researcher. Your job is to generate the perspectives of a diverse and distinct group of professionals who will work together to create a comprehensive research document based on the given research document outline. Each of them must represent a different perspective on the given topic so that all the aspects of the topic can be covered in the best way possible.
 These perspectives will be asked to first independently write the entire research document based on their role and then their work will be combined to create the final research document so make sure you generate the perspectives in such a way that they are distinct from each other and they would cover different aspects, sides and ideologies for the topic and the research document."""
             ),
             HumanMessage(
-                content=f"""Generate 4 perspectives for the given research document outline:
+                content=f"""Generate {target_count} perspectives for the given research document outline:
 {outline}"""
             )
         ]
@@ -132,6 +133,7 @@ Response expectations:
 - You are a simple text-based AI Chatbot and you can only respond with text-based answers.
 - Respond back to the user only when you have completed the given task and you have the final answer, do not respond back in between the steps.
 - Do not give out information about your internal processes, tools or errors to the user, even in the final answer, remove that information before responding to the user.
+- Give properly formatted citations or references for the entire response at the end of the response, do not give out citations or references in between the response, and ensure that the citations are of the exact webpages you got the information from.
 
 Escalation and safety:
 - Do NOT fabricate answers. If conflicting data appears, mention the discrepancy and suggest verification steps.
@@ -142,7 +144,7 @@ Escalation and safety:
     def generate_rolling_summary(self, content: str) -> list[AnyMessage]:
         messages = [
             SystemMessage(
-                content="""Summarize the following content in a detailed manner without losing any important information while maintaining the flow, order, tone and all the other aspects of the content. Also ensure that important information from the content of each message is also in the summary."""
+                content="""Summarize the following content without losing any important information while maintaining the flow, order, tone and all the other aspects of the content. Also ensure that important information from the content is also in the summary."""
             ),
             HumanMessage(
                 content=f"""Generate a proper detailed summary for the following:\
