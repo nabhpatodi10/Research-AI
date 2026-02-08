@@ -59,7 +59,14 @@ export default function ChatHistory({
   return (
     <div className="space-y-2">
       {filtered.map((session) => {
-        const createdAtText = session.createdAt ? new Date(session.createdAt).toLocaleDateString() : '';
+        const createdAtText = session.createdAt
+          ? new Date(session.createdAt).toLocaleString([], {
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            })
+          : '';
         const isActive = activeSessionId === session.id;
 
         return (

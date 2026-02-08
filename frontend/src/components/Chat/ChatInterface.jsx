@@ -24,6 +24,77 @@ const QUICK_PROMPTS = [
   'Build a launch-ready research brief for an AI tutor product.',
 ];
 
+const COMMAND_OPTIONS = [
+  {
+    command: '/research',
+    label: '/research',
+    description: 'Run deep research and generate a full research document.',
+  },
+];
+
+const RESEARCH_COMMAND_PATTERN = /^\s*\/research(?:\s+([\s\S]*))?$/i;
+
+const parseResearchCommand = (value) => {
+  const raw = String(value ?? '');
+  const matched = raw.match(RESEARCH_COMMAND_PATTERN);
+  if (!matched) {
+    return { isResearchCommand: false, topic: '', isEmptyResearchCommand: false };
+  }
+  const topic = String(matched[1] ?? '').trim();
+  return {
+    isResearchCommand: true,
+    topic,
+    isEmptyResearchCommand: topic.length === 0,
+  };
+};
+
+const getSlashTokenInfo = (value, cursorPosition) => {
+  const text = String(value ?? '');
+  const cursor = Number.isFinite(cursorPosition) ? cursorPosition : text.length;
+  const head = text.slice(0, cursor);
+  const tokenMatch = head.match(/(?:^|\s)(\/[^\s]*)$/);
+  if (!tokenMatch) return null;
+  const token = tokenMatch[1];
+  const start = head.length - token.length;
+  return { token, start, end: cursor };
+};
+
+const CHAT_SETTINGS_STORAGE_KEY = 'ra-chat-settings-v1';
+const DEFAULT_CHAT_SETTINGS = {
+  model: 'pro',
+  research_breadth: 'medium',
+  research_depth: 'high',
+  document_length: 'high',
+};
+
+const VALID_CHAT_SETTING_VALUES = {
+  model: new Set(['mini', 'pro']),
+  research_breadth: new Set(['low', 'medium', 'high']),
+  research_depth: new Set(['low', 'high']),
+  document_length: new Set(['low', 'medium', 'high']),
+};
+
+const sanitizeChatSettings = (candidate) => {
+  if (!candidate || typeof candidate !== 'object') {
+    return { ...DEFAULT_CHAT_SETTINGS };
+  }
+
+  return {
+    model: VALID_CHAT_SETTING_VALUES.model.has(candidate.model)
+      ? candidate.model
+      : DEFAULT_CHAT_SETTINGS.model,
+    research_breadth: VALID_CHAT_SETTING_VALUES.research_breadth.has(candidate.research_breadth)
+      ? candidate.research_breadth
+      : DEFAULT_CHAT_SETTINGS.research_breadth,
+    research_depth: VALID_CHAT_SETTING_VALUES.research_depth.has(candidate.research_depth)
+      ? candidate.research_depth
+      : DEFAULT_CHAT_SETTINGS.research_depth,
+    document_length: VALID_CHAT_SETTING_VALUES.document_length.has(candidate.document_length)
+      ? candidate.document_length
+      : DEFAULT_CHAT_SETTINGS.document_length,
+  };
+};
+
 const SidebarContent = ({
   sessions,
   sessionsLoading,
@@ -139,6 +210,18 @@ export default function ChatInterface() {
 
   const [input, setInput] = useState('');
   const [isGeneratingResponse, setIsGeneratingResponse] = useState(false);
+  const [chatSettings, setChatSettings] = useState(() => {
+    if (typeof window === 'undefined') {
+      return { ...DEFAULT_CHAT_SETTINGS };
+    }
+    try {
+      const raw = window.localStorage.getItem(CHAT_SETTINGS_STORAGE_KEY);
+      if (!raw) return { ...DEFAULT_CHAT_SETTINGS };
+      return sanitizeChatSettings(JSON.parse(raw));
+    } catch {
+      return { ...DEFAULT_CHAT_SETTINGS };
+    }
+  });
 
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [renameSessionId, setRenameSessionId] = useState(null);
@@ -155,10 +238,15 @@ export default function ChatInterface() {
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [searchTerm, setSearchTerm] = useState('');
+  const [composerError, setComposerError] = useState('');
+  const [showCommandMenu, setShowCommandMenu] = useState(false);
+  const [commandSuggestions, setCommandSuggestions] = useState([]);
+  const [activeCommandIndex, setActiveCommandIndex] = useState(0);
 
   const sessionIdRef = useRef(sessionId);
   const isGeneratingRef = useRef(false);
   const composerRef = useRef(null);
+  const commandTokenRangeRef = useRef({ start: 0, end: 0 });
 
   const applySessionTitleFromList = useCallback((allSessions, targetSessionId) => {
     if (!targetSessionId) return;
@@ -210,6 +298,80 @@ export default function ChatInterface() {
     resizeComposer();
   }, [input, resizeComposer]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(CHAT_SETTINGS_STORAGE_KEY, JSON.stringify(chatSettings));
+    } catch {
+      // Ignore localStorage persistence errors.
+    }
+  }, [chatSettings]);
+
+  const updateChatSetting = (key, value) => {
+    setChatSettings((prev) =>
+      sanitizeChatSettings({
+        ...prev,
+        [key]: value,
+      })
+    );
+  };
+
+  const closeCommandMenu = useCallback(() => {
+    setShowCommandMenu(false);
+    setCommandSuggestions([]);
+    setActiveCommandIndex(0);
+  }, []);
+
+  const updateCommandSuggestions = useCallback(
+    (value, cursorPosition) => {
+      const tokenInfo = getSlashTokenInfo(value, cursorPosition);
+      if (!tokenInfo || !tokenInfo.token.startsWith('/')) {
+        closeCommandMenu();
+        return;
+      }
+
+      const tokenLower = tokenInfo.token.toLowerCase();
+      const suggestions = COMMAND_OPTIONS.filter((option) =>
+        option.command.toLowerCase().startsWith(tokenLower)
+      );
+      if (suggestions.length === 0) {
+        closeCommandMenu();
+        return;
+      }
+
+      commandTokenRangeRef.current = { start: tokenInfo.start, end: tokenInfo.end };
+      setCommandSuggestions(suggestions);
+      setActiveCommandIndex(0);
+      setShowCommandMenu(true);
+    },
+    [closeCommandMenu]
+  );
+
+  const applyCommandSuggestion = useCallback(
+    (command) => {
+      const textarea = composerRef.current;
+      const sourceText = textarea?.value ?? input;
+      const { start, end } = commandTokenRangeRef.current;
+      const before = sourceText.slice(0, start);
+      const after = sourceText.slice(end);
+      const inserted = `${command} `;
+      const nextValue = `${before}${inserted}${after}`;
+      const nextCursor = before.length + inserted.length;
+
+      setInput(nextValue);
+      setComposerError('');
+      closeCommandMenu();
+
+      requestAnimationFrame(() => {
+        const target = composerRef.current;
+        if (!target) return;
+        target.focus();
+        target.setSelectionRange(nextCursor, nextCursor);
+      });
+    },
+    [closeCommandMenu, input]
+  );
+
   const handleNewChat = () => {
     setMessages([]);
     setInput('');
@@ -221,6 +383,8 @@ export default function ChatInterface() {
     setRenameValue('');
     setRenameError('');
     setShareError('');
+    setComposerError('');
+    closeCommandMenu();
   };
 
   const handleRenameChat = (targetSessionId, currentTitle = 'Untitled Session') => {
@@ -336,11 +500,25 @@ export default function ChatInterface() {
 
   const handleSend = async (event) => {
     event.preventDefault();
-    const messageText = input.trim();
-    if (!messageText || isGeneratingRef.current) return;
+    if (isGeneratingRef.current) return;
+
+    const rawInput = input;
+    const trimmedInput = rawInput.trim();
+    const commandState = parseResearchCommand(rawInput);
+    if (!trimmedInput) return;
+    if (commandState.isEmptyResearchCommand) {
+      setComposerError('Add a topic after /research before sending.');
+      return;
+    }
+
+    const shouldForceResearch = commandState.isResearchCommand;
+    const messageText = shouldForceResearch ? commandState.topic : trimmedInput;
+    if (!messageText) return;
 
     isGeneratingRef.current = true;
     setIsGeneratingResponse(true);
+    setComposerError('');
+    closeCommandMenu();
 
     const pendingMessageId = `pending-${createClientMessageId()}`;
     setMessages((prev) => [
@@ -359,7 +537,12 @@ export default function ChatInterface() {
         method: 'POST',
         body: JSON.stringify({
           user_input: messageText,
+          force_research: shouldForceResearch,
           session_id: sessionIdRef.current,
+          model: chatSettings.model,
+          research_breadth: chatSettings.research_breadth,
+          research_depth: chatSettings.research_depth,
+          document_length: chatSettings.document_length,
         }),
       });
 
@@ -403,11 +586,47 @@ export default function ChatInterface() {
   };
 
   const handleComposerKeyDown = (event) => {
+    if (showCommandMenu) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeCommandMenu();
+        return;
+      }
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setActiveCommandIndex((index) =>
+          commandSuggestions.length === 0 ? 0 : (index + 1) % commandSuggestions.length
+        );
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setActiveCommandIndex((index) =>
+          commandSuggestions.length === 0
+            ? 0
+            : (index - 1 + commandSuggestions.length) % commandSuggestions.length
+        );
+        return;
+      }
+      if ((event.key === 'Enter' || event.key === 'Tab') && commandSuggestions.length > 0) {
+        event.preventDefault();
+        const selected = commandSuggestions[activeCommandIndex] || commandSuggestions[0];
+        if (selected?.command) {
+          applyCommandSuggestion(selected.command);
+        }
+        return;
+      }
+    }
+
     if (event.key !== 'Enter') return;
     if (event.shiftKey) return;
 
     event.preventDefault();
     if (chatLoading || isGeneratingResponse || !input.trim()) return;
+    if (parseResearchCommand(input).isEmptyResearchCommand) {
+      setComposerError('Add a topic after /research before sending.');
+      return;
+    }
     event.currentTarget.form?.requestSubmit();
   };
 
@@ -438,6 +657,8 @@ export default function ChatInterface() {
       setShareLoading(false);
     }
   };
+
+  const isEmptyResearchCommand = parseResearchCommand(input).isEmptyResearchCommand;
 
   return (
     <div className="relative flex h-screen overflow-hidden bg-gradient-to-b from-slate-50 via-blue-50/40 to-slate-100">
@@ -757,22 +978,111 @@ export default function ChatInterface() {
         <footer className="border-t border-blue-100/90 bg-white/80 px-4 py-4 backdrop-blur-md md:px-8 md:py-5">
           <form onSubmit={handleSend} className="mx-auto w-full max-w-5xl">
             <div className="rounded-2xl border border-blue-100 bg-white p-2 shadow-sm">
-              <div className="flex items-end gap-2">
+              <div className="grid gap-2 px-1 pb-2 sm:grid-cols-2 lg:grid-cols-4">
+                <label className="flex flex-col gap-1 rounded-xl border border-blue-100 bg-blue-50/30 px-2.5 py-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-800">Model</span>
+                  <select
+                    value={chatSettings.model}
+                    onChange={(event) => updateChatSetting('model', event.target.value)}
+                    disabled={chatLoading || isGeneratingResponse}
+                    className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option value="mini">Mini</option>
+                    <option value="pro">Pro</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 rounded-xl border border-blue-100 bg-blue-50/30 px-2.5 py-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-800">Breadth</span>
+                  <select
+                    value={chatSettings.research_breadth}
+                    onChange={(event) => updateChatSetting('research_breadth', event.target.value)}
+                    disabled={chatLoading || isGeneratingResponse}
+                    className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 rounded-xl border border-blue-100 bg-blue-50/30 px-2.5 py-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-800">Depth</span>
+                  <select
+                    value={chatSettings.research_depth}
+                    onChange={(event) => updateChatSetting('research_depth', event.target.value)}
+                    disabled={chatLoading || isGeneratingResponse}
+                    className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option value="low">Low</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 rounded-xl border border-blue-100 bg-blue-50/30 px-2.5 py-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-800">Document Length</span>
+                  <select
+                    value={chatSettings.document_length}
+                    onChange={(event) => updateChatSetting('document_length', event.target.value)}
+                    disabled={chatLoading || isGeneratingResponse}
+                    className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="relative flex items-end gap-2">
                 <textarea
                   ref={composerRef}
                   rows={1}
                   wrap="soft"
                   value={input}
-                  onChange={(event) => setInput(event.target.value)}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setInput(nextValue);
+                    if (composerError) setComposerError('');
+                    updateCommandSuggestions(nextValue, event.target.selectionStart ?? nextValue.length);
+                  }}
+                  onClick={(event) => {
+                    updateCommandSuggestions(event.currentTarget.value, event.currentTarget.selectionStart);
+                  }}
+                  onKeyUp={(event) => {
+                    updateCommandSuggestions(event.currentTarget.value, event.currentTarget.selectionStart);
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => closeCommandMenu(), 100);
+                  }}
                   onKeyDown={handleComposerKeyDown}
                   placeholder={sessionId ? 'Ask a follow-up question...' : 'Describe what you want to research...'}
                   className="max-h-[180px] w-full resize-none rounded-xl border border-transparent bg-transparent px-3 py-2.5 text-sm leading-6 text-slate-800 outline-none focus:border-blue-100 whitespace-pre-wrap break-words"
                   disabled={chatLoading || isGeneratingResponse}
                 />
+                {showCommandMenu && commandSuggestions.length > 0 && (
+                  <div
+                    className="absolute bottom-full left-2 right-16 z-20 mb-2 overflow-hidden rounded-xl border border-blue-100 bg-white shadow-lg"
+                    onMouseDown={(event) => event.preventDefault()}
+                  >
+                    {commandSuggestions.map((option, index) => (
+                      <button
+                        key={option.command}
+                        type="button"
+                        onClick={() => applyCommandSuggestion(option.command)}
+                        className={`block w-full px-3 py-2 text-left transition ${
+                          index === activeCommandIndex
+                            ? 'bg-blue-50 text-blue-900'
+                            : 'bg-white text-slate-700 hover:bg-blue-50'
+                        }`}
+                      >
+                        <p className="text-sm font-semibold">{option.label}</p>
+                        <p className="text-xs text-slate-500">{option.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <button
                   type="submit"
                   className="inline-flex items-center gap-2 rounded-xl bg-blue-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={chatLoading || isGeneratingResponse || !input.trim()}
+                  disabled={chatLoading || isGeneratingResponse || !input.trim() || isEmptyResearchCommand}
                 >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10.5 22 3l-7.5 19-2.8-8.7L3 10.5Z" />
@@ -785,6 +1095,9 @@ export default function ChatInterface() {
                 <span>{isGeneratingResponse ? 'Wait for the current response to finish before sending another message.' : 'Enter to send. Shift+Enter for a new line.'}</span>
                 <span>{sessionId ? 'Session active' : 'New session'}</span>
               </div>
+              {composerError && (
+                <p className="px-2 pb-1 text-xs text-red-600">{composerError}</p>
+              )}
             </div>
           </form>
         </footer>
