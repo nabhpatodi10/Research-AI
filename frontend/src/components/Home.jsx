@@ -65,79 +65,81 @@ export default function Home() {
         <div className="absolute -left-24 top-16 -z-10 h-72 w-72 rounded-full bg-blue-400/30 blur-3xl float-slow" />
         <div className="absolute -right-12 bottom-8 -z-10 h-64 w-64 rounded-full bg-indigo-200/20 blur-3xl float-slow" />
 
-        <div className="max-w-6xl mx-auto px-4 py-18 md:py-24">
-          <div className="grid gap-12 lg:grid-cols-[1.1fr_0.9fr] items-center">
+        <div className="max-w-6xl mx-auto px-4 py-12 sm:py-16 md:py-24">
+          <div className="grid items-center gap-8 sm:gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:gap-12">
             <div className="text-white">
-              <p className="reveal-up inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-4 py-1.5 text-xs font-semibold tracking-wide uppercase">
+              <p className="reveal-up inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-4 py-1.5 text-[11px] font-semibold tracking-wide uppercase sm:text-xs">
                 AI Research Platform
               </p>
-              <h1 className="reveal-up delay-1 mt-5 text-4xl md:text-6xl font-bold leading-tight">
+              <h1 className="reveal-up delay-1 mt-5 text-3xl font-bold leading-tight sm:text-4xl md:text-6xl">
                 Build stronger research outputs with a chat-native workflow.
               </h1>
-              <p className="reveal-up delay-2 mt-5 text-blue-100 text-lg max-w-2xl">
+              <p className="reveal-up delay-2 mt-5 max-w-2xl text-base text-blue-100 sm:text-lg">
                 ResearchAI helps you go from first question to publication-grade output in one focused workspace.
               </p>
-              <div className="reveal-up delay-3 mt-8 flex flex-wrap items-center gap-3">
+              <div className="reveal-up delay-3 mt-8 flex flex-wrap items-center gap-3 sm:gap-4">
                 <Link
                   to={primaryHref}
-                  className="rounded-xl bg-white px-6 py-3 font-semibold text-blue-900 hover:bg-blue-50 transition"
+                  className="w-full rounded-xl bg-white px-6 py-3 text-center font-semibold text-blue-900 transition hover:bg-blue-50 sm:w-auto"
                 >
                   {primaryLabel}
                 </Link>
                 <a
                   href="#workflow"
-                  className="rounded-xl border border-white/40 bg-white/10 px-6 py-3 font-semibold text-white hover:bg-white/20 transition"
+                  className="w-full rounded-xl border border-white/40 bg-white/10 px-6 py-3 text-center font-semibold text-white transition hover:bg-white/20 sm:w-auto"
                 >
                   See Workflow
                 </a>
               </div>
             </div>
 
-            <div className="reveal-up delay-2">
-              <div className="glass-panel rounded-2xl p-6 shadow-2xl">
-                <div className="rounded-xl border border-blue-100 bg-white p-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">Research AI</p>
+            <div className="reveal-up delay-2 mx-auto w-full max-w-xl lg:max-w-none">
+              <div className="glass-panel overflow-hidden rounded-2xl p-3 shadow-2xl sm:p-5">
+                <div className="rounded-xl border border-blue-100 bg-white p-3.5 sm:p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-2 sm:items-center sm:gap-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700 sm:text-xs sm:tracking-[0.18em]">Research AI</p>
                     <span className="inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
                       Live Workflow
                     </span>
                   </div>
 
-                  <h2 className="mt-3 text-xl font-bold text-slate-900">
+                  <h2 className="mt-3 text-[1.05rem] font-bold leading-tight text-slate-900 sm:text-xl">
                     Plan, run, and refine in one workspace
                   </h2>
 
-                  <div className="mt-4 grid gap-2">
+                  <div className="mt-4 grid gap-2.5">
                     {[
                       'Keep every idea, note, and iteration in one place.',
                       'Transform rough questions into structured, decision-ready insights.',
                       'Produce shareable outputs that are easy for teams to review and build on.',
                     ].map((item) => (
-                      <div key={item} className="flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/40 px-3 py-2">
-                        <span className="mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-blue-900 text-[10px] font-bold text-white">
-                          ✓
+                      <div key={item} className="flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/40 px-2.5 py-2.5 sm:px-3">
+                        <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-blue-900 text-white">
+                          <svg className="h-2.5 w-2.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path fillRule="evenodd" d="M16.704 5.29a1 1 0 0 1 .006 1.414l-8 8a1 1 0 0 1-1.42-.003l-4-4a1 1 0 0 1 1.414-1.414l3.293 3.293 7.296-7.296a1 1 0 0 1 1.411.006Z" clipRule="evenodd" />
+                          </svg>
                         </span>
-                        <p className="text-sm text-slate-700">{item}</p>
+                        <p className="text-[13px] leading-5 text-slate-700 sm:text-sm">{item}</p>
                       </div>
                     ))}
                   </div>
 
-                  <div className="mt-4 grid grid-cols-3 gap-2">
+                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <div className="rounded-lg bg-blue-50 px-3 py-2">
-                      <p className="text-[11px] text-blue-900/80">Output Quality</p>
-                      <p className="text-base font-bold text-blue-900">Structured & Grounded</p>
+                      <p className="text-[11px] uppercase tracking-wide text-blue-900/70">Output Quality</p>
+                      <p className="text-sm font-bold leading-5 text-blue-900">Structured and Grounded</p>
                     </div>
                     <div className="rounded-lg bg-blue-50 px-3 py-2">
-                      <p className="text-[11px] text-blue-900/80">Workspace</p>
-                      <p className="text-base font-bold text-blue-900">Individual or Collaborative</p>
+                      <p className="text-[11px] uppercase tracking-wide text-blue-900/70">Workspace</p>
+                      <p className="text-sm font-bold leading-5 text-blue-900">Individual or Collaborative</p>
                     </div>
-                    <div className="rounded-lg bg-blue-50 px-3 py-2">
-                      <p className="text-[11px] text-blue-900/80">Research Speed</p>
-                      <p className="text-base font-bold text-blue-900">Quick Iteration</p>
+                    <div className="rounded-lg bg-blue-50 px-3 py-2 sm:col-span-2">
+                      <p className="text-[11px] uppercase tracking-wide text-blue-900/70">Research Speed</p>
+                      <p className="text-sm font-bold leading-5 text-blue-900">Quick Iteration</p>
                     </div>
                   </div>
                 </div>
-                <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                <div className="mt-3.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-3 text-[13px] leading-5 text-blue-900 sm:mt-4 sm:px-4 sm:text-sm sm:leading-6">
                   Start simple, iterate quickly, and publish with confidence when your scope is stable.
                 </div>
               </div>
