@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="logoTitle logoDesc">
+  <title id="logoTitle">Research AI logo</title>
+  <desc id="logoDesc">A magnifier and neural nodes icon on a blue gradient background.</desc>
+  <defs>
+    <linearGradient id="bgGradient" x1="24" y1="24" x2="232" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0B1F5E" />
+      <stop offset="0.56" stop-color="#123E9E" />
+      <stop offset="1" stop-color="#1D4ED8" />
+    </linearGradient>
+    <radialGradient id="glowGradient" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(196 46) rotate(140) scale(172 150)">
+      <stop offset="0" stop-color="#7DD3FC" stop-opacity="0.6" />
+      <stop offset="1" stop-color="#7DD3FC" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="panelGradient" x1="70" y1="50" x2="168" y2="178" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.26" />
+      <stop offset="1" stop-color="#DBEAFE" stop-opacity="0.08" />
+    </linearGradient>
+  </defs>
+
+  <rect x="12" y="12" width="232" height="232" rx="52" fill="url(#bgGradient)" />
+  <rect x="12" y="12" width="232" height="232" rx="52" fill="url(#glowGradient)" />
+
+  <rect x="58" y="48" width="104" height="142" rx="14" fill="url(#panelGradient)" stroke="#BFDBFE" stroke-opacity="0.45" stroke-width="3" />
+  <path d="M78 80H142" stroke="#DBEAFE" stroke-opacity="0.72" stroke-width="5" stroke-linecap="round" />
+  <path d="M78 98H136" stroke="#DBEAFE" stroke-opacity="0.62" stroke-width="5" stroke-linecap="round" />
+  <path d="M78 116H126" stroke="#DBEAFE" stroke-opacity="0.54" stroke-width="5" stroke-linecap="round" />
+
+  <circle cx="138" cy="136" r="35" fill="none" stroke="#F8FAFC" stroke-width="10" />
+  <path d="M163 161L192 190" fill="none" stroke="#F8FAFC" stroke-width="11" stroke-linecap="round" />
+
+  <path d="M124 145L139 131L152 144" fill="none" stroke="#93C5FD" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M139 131V149" fill="none" stroke="#93C5FD" stroke-width="4.5" stroke-linecap="round" />
+  <circle cx="124" cy="145" r="4.8" fill="#E0F2FE" />
+  <circle cx="139" cy="131" r="4.8" fill="#E0F2FE" />
+  <circle cx="152" cy="144" r="4.8" fill="#E0F2FE" />
+  <circle cx="139" cy="149" r="4.8" fill="#E0F2FE" />
+
+  <circle cx="80" cy="186" r="4.2" fill="#DBEAFE" fill-opacity="0.78" />
+  <circle cx="186" cy="64" r="5.4" fill="#7DD3FC" fill-opacity="0.92" />
+</svg>

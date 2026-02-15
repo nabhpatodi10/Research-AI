@@ -248,6 +248,10 @@ async def chat_endpoint(
         )
         result = await chat_agent.graph.ainvoke(state)
         final_document = result.get("final_document")
+        try:
+            final_document = final_document.as_str if final_document else None
+        except Exception:
+             pass
         if final_document:
             return ChatResponse(session_id=session_id, response=str(final_document))
 

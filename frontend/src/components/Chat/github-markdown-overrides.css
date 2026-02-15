@@ -1,59 +1,361 @@
 .markdown-body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    font-size: 16px;
-    line-height: 1.5;
-    color: #24292f;
-    background-color: #f9fafb;
-    overflow-wrap: anywhere;
-  }
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.65;
+  color: inherit;
+  background-color: transparent;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  padding: 0.9rem 1rem;
+}
 
-  .markdown-body a {
-    color: #0059ff;
-  }
-  
-  .markdown-body pre {
-    border-radius: 6px;
-    padding: 16px;
-    overflow: auto;
-  }
+.markdown-body > *:first-child {
+  margin-top: 0;
+}
 
-  .markdown-body code.hljs {
-    white-space: pre-wrap;
-  }
-  
-  .markdown-body code:not(.hljs) {
-    color: #f9fafb;
-    --bgColor-neutral-muted: #656c76;
-    padding: 0.2em 0.4em;
-    border-radius: 6px;
-  }
-  
-  .markdown-body table {
-    color: #f9fafb;
-    --bgColor-default: #24292f;
-    --bgColor-muted: #24292f;
-    --fgColor-default: #f9fafb;
-    --fgColor-muted: #f9fafb;
-    border-spacing: 0;
-    border-collapse: collapse;
-    display: block;
-    width: 100%;
-    overflow-x: auto;
-  }
-  
-  .markdown-body th {
-    font-weight: 600;
-    padding: 6px 13px;
-    border: 1px solid #d0d7de;
-  }
-  
-  .markdown-body td {
-    padding: 6px 13px;
-    border: 1px solid #d0d7de;
-  }
-  
-  .markdown-body img {
-    max-width: 100%;
-    box-sizing: content-box;
-    background-color: #f9fafb;
-  }
+.markdown-body > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body.markdown-body--assistant {
+  color: #1f2937;
+}
+
+.markdown-body.markdown-body--user {
+  color: #eff6ff;
+}
+
+.markdown-body.markdown-body--error {
+  color: #b91c1c;
+}
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body blockquote,
+.markdown-body pre {
+  margin: 0.6em 0;
+}
+
+.markdown-body .markdown-table-shell {
+  margin: 0.6em 0;
+  width: 100%;
+  max-width: 100%;
+  border-radius: 0;
+  overflow: visible;
+}
+
+.markdown-body .markdown-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.markdown-body .markdown-table-wrap::-webkit-scrollbar {
+  height: 9px;
+}
+
+.markdown-body .markdown-table-wrap::-webkit-scrollbar-track {
+  border-radius: 999px;
+}
+
+.markdown-body .markdown-table-wrap::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+}
+
+.markdown-body.markdown-body--assistant .markdown-table-shell {
+  background: transparent;
+}
+
+.markdown-body.markdown-body--assistant .markdown-table-wrap {
+  scrollbar-color: #94a3b8 #e2e8f0;
+}
+
+.markdown-body.markdown-body--assistant .markdown-table-wrap::-webkit-scrollbar-track {
+  background: #e2e8f0;
+}
+
+.markdown-body.markdown-body--assistant .markdown-table-wrap::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border: 2px solid #e2e8f0;
+}
+
+.markdown-body.markdown-body--assistant .markdown-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+.markdown-body.markdown-body--user .markdown-table-shell {
+  background: transparent;
+}
+
+.markdown-body.markdown-body--user .markdown-table-wrap {
+  scrollbar-color: #bfdbfeb3 #0f172aad;
+}
+
+.markdown-body.markdown-body--user .markdown-table-wrap::-webkit-scrollbar-track {
+  background: #0f172aad;
+}
+
+.markdown-body.markdown-body--user .markdown-table-wrap::-webkit-scrollbar-thumb {
+  background: #bfdbfeb3;
+  border: 2px solid #0f172aad;
+}
+
+.markdown-body.markdown-body--user .markdown-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: #dbeafee6;
+}
+
+.markdown-body.markdown-body--error .markdown-table-shell {
+  background: transparent;
+}
+
+.markdown-body.markdown-body--error .markdown-table-wrap {
+  scrollbar-color: #f87171 #fee2e2;
+}
+
+.markdown-body.markdown-body--error .markdown-table-wrap::-webkit-scrollbar-track {
+  background: #fee2e2;
+}
+
+.markdown-body.markdown-body--error .markdown-table-wrap::-webkit-scrollbar-thumb {
+  background: #f87171;
+  border: 2px solid #fee2e2;
+}
+
+.markdown-body.markdown-body--error .markdown-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: #ef4444;
+}
+
+.markdown-body a {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.markdown-body.markdown-body--user a {
+  color: #bfdbfe;
+}
+
+.markdown-body.markdown-body--user p,
+.markdown-body.markdown-body--user li {
+  white-space: pre-wrap;
+}
+
+.markdown-body pre {
+  border-radius: 0;
+  padding: 14px;
+  overflow: auto;
+  background: #0f172a;
+  scrollbar-width: thin;
+  scrollbar-color: #64748b #1e293b;
+}
+
+.markdown-body pre::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+.markdown-body pre::-webkit-scrollbar-track {
+  background: #1e293b;
+  border-radius: 999px;
+}
+
+.markdown-body pre::-webkit-scrollbar-thumb {
+  background: #64748b;
+  border: 2px solid #1e293b;
+  border-radius: 999px;
+}
+
+.markdown-body pre::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.markdown-body pre::-webkit-scrollbar-corner {
+  background: #1e293b;
+  border-bottom-right-radius: 10px;
+}
+
+.markdown-body.markdown-body--user pre {
+  scrollbar-color: #93c5fd #0f172a;
+}
+
+.markdown-body.markdown-body--user pre::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+.markdown-body.markdown-body--user pre::-webkit-scrollbar-thumb {
+  background: #93c5fd;
+  border-color: #0f172a;
+}
+
+.markdown-body.markdown-body--user pre::-webkit-scrollbar-thumb:hover {
+  background: #bfdbfe;
+}
+
+.markdown-body.markdown-body--user pre::-webkit-scrollbar-corner {
+  background: #0f172a;
+  border-bottom-right-radius: 10px;
+}
+
+.markdown-body.markdown-body--error pre {
+  scrollbar-color: #f87171 #7f1d1d;
+}
+
+.markdown-body.markdown-body--error pre::-webkit-scrollbar-track {
+  background: #7f1d1d;
+}
+
+.markdown-body.markdown-body--error pre::-webkit-scrollbar-thumb {
+  background: #f87171;
+  border-color: #7f1d1d;
+}
+
+.markdown-body.markdown-body--error pre::-webkit-scrollbar-thumb:hover {
+  background: #fca5a5;
+}
+
+.markdown-body.markdown-body--error pre::-webkit-scrollbar-corner {
+  background: #7f1d1d;
+  border-bottom-right-radius: 10px;
+}
+
+.markdown-body code.hljs {
+  white-space: pre;
+}
+
+.markdown-body code:not(.hljs) {
+  padding: 0.16em 0.45em;
+  border-radius: 0;
+  background: #94a3b833;
+  color: inherit;
+}
+
+.hljs-subst {
+    color: #91c8ff !important;
+}
+
+.markdown-body.markdown-body--user code:not(.hljs) {
+  background: #eff6ff33;
+}
+
+.hljs-comment {
+    color: #b6b6b6 !important;
+}
+
+.hljs-attr, .hljs-attribute, .hljs-literal, .hljs-meta, .hljs-number, .hljs-operator, .hljs-variable, .hljs-selector-attr, .hljs-selector-class, .hljs-selector-id {
+    color: #0077ff !important;
+}
+
+.markdown-body table {
+  border-spacing: 0;
+  border-collapse: collapse;
+  display: table;
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  table-layout: auto;
+}
+
+.markdown-body th,
+.markdown-body td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  padding: 6px 13px;
+  border: 1px solid #d0d7de;
+}
+
+.markdown-body th {
+  font-weight: 600;
+}
+
+.markdown-body.markdown-body--assistant table {
+  border: 1px solid #d0d7de;
+  background: #ffffff;
+}
+
+.markdown-body.markdown-body--assistant th {
+  background: #f8fafc;
+  color: #1f2937;
+}
+
+.markdown-body.markdown-body--assistant td {
+  background: #ffffff;
+  color: #1f2937;
+}
+
+.markdown-body.markdown-body--assistant tr:nth-child(even) td {
+  background: #f8fafc;
+}
+
+.markdown-body.markdown-body--user table {
+  border: 1px solid #dbeafe59;
+  background: #0f172a47;
+}
+
+.markdown-body.markdown-body--user th {
+  background: #0f172a94;
+  color: #eff6ff;
+  border-color: #dbeafe59;
+}
+
+.markdown-body.markdown-body--user td {
+  background: #0f172a61;
+  color: #eff6ff;
+  border-color: #dbeafe59;
+}
+
+.markdown-body.markdown-body--user tr:nth-child(even) td {
+  background: #0f172a80;
+}
+
+.markdown-body.markdown-body--error table {
+  border: 1px solid #fca5a5;
+  background: #fef2f2;
+}
+
+.markdown-body.markdown-body--error th {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.markdown-body.markdown-body--error td {
+  background: #fff7f7;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.markdown-body.markdown-body--error tr:nth-child(even) td {
+  background: #fee2e2;
+}
+
+.markdown-body img {
+  max-width: 100%;
+  box-sizing: content-box;
+}
+
+.markdown-body .katex {
+  font-size: 1em;
+}
+
+.markdown-body .katex-display {
+  margin: 0.8em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.15em;
+}
+
+.markdown-body .katex-display > .katex {
+  text-align: left;
+}
+
+.markdown-body.markdown-body--user .katex,
+.markdown-body.markdown-body--user .katex .base {
+  color: #eff6ff;
+}
+
+.markdown-body.markdown-body--error .katex,
+.markdown-body.markdown-body--error .katex .base {
+  color: #b91c1c;
+}

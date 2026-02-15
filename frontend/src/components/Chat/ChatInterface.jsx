@@ -176,22 +176,19 @@ function MessageBubble({ msg }) {
   const isUser = msg.sender === 'user';
   const isAssistant = msg.sender === 'ai';
   const isError = msg.sender === 'ai-error' || msg.sender === 'system-error';
+  const markdownVariant = isUser ? 'user' : isError ? 'error' : 'assistant';
 
   return (
     <div
       className={`max-w-full overflow-hidden rounded-2xl shadow-sm md:max-w-[78%] ${
         isUser
-          ? 'bg-blue-900 px-4 py-3 text-white'
+          ? 'bg-blue-900 text-white'
           : isAssistant
             ? 'border border-blue-100 bg-white text-slate-800'
-            : 'border border-red-200 bg-red-50 px-4 py-3 text-red-700'
+            : 'border border-red-200 bg-red-50 text-red-700'
       }`}
     >
-      {isAssistant || isError ? (
-        <MarkdownRenderer content={msg.text} />
-      ) : (
-        <div className="whitespace-pre-wrap leading-6">{msg.text}</div>
-      )}
+      <MarkdownRenderer content={msg.text} variant={markdownVariant} />
     </div>
   );
 }
