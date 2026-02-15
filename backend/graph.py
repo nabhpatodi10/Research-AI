@@ -55,8 +55,8 @@ class ResearchGraph:
             reasoning={"effort": "medium"},
             verbosity=verbosity,
             use_responses_api=True,
-            service_tier="priority",
-            timeout=180.0,
+            # service_tier="priority",
+            timeout=600.0,
         )
         self.__summary_model = ChatGoogleGenerativeAI(model = "models/gemini-flash-lite-latest")
         self.__final_content_model = ChatOpenAI(
@@ -64,10 +64,10 @@ class ResearchGraph:
             reasoning={"effort": "high"},
             verbosity=verbosity,
             use_responses_api=True,
-            service_tier="priority",
-            timeout=180.0,
+            # service_tier="priority",
+            timeout=600.0,
         )
-        self.__section_attempt_timeout_seconds = 300.0
+        self.__section_attempt_timeout_seconds = 900.0
         self.__section_retry_delays = (0.5, 1.0)
         self.__tools = Tools(
             session_id=session_id,
