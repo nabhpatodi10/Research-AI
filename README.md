@@ -14,6 +14,18 @@ ResearchAI is a full-stack, backend-first research assistant:
 - Stores sessions, supports rename/share/delete, and keeps chats ordered by recent activity.
 - Supports `/research` command flow from frontend and backend orchestration.
 
+## Benchmark Results
+
+ResearchAI was evaluated on the [DeepResearch Bench](https://github.com/Ayanami0730/deep_research_bench) benchmark with the following results:
+
+- Comprehensiveness: `0.5595`
+- Insight: `0.5930`
+- Instruction Following: `0.5208`
+- Readability: `0.5253`
+- Overall Score: `0.5532`
+
+With these results, ResearchAI is at the **1st position on the leaderboard of DeepResearch Bench**.
+
 ## Current Architecture
 
 ### Backend (`backend/`)
@@ -176,33 +188,6 @@ Backend:
 
 - `GET /`
 
-## Environment Variables
-
-Backend (`backend/.env`):
-
-- `SEARCH_ENGINE_ID`
-- `GEMINI_API_KEY`
-- `FIREBASE_WEB_API_KEY`
-- `OPENAI_API_KEY`
-- `GOOGLE_PROJECT_ID`
-- `GOOGLE_CLOUD_LOCATION`
-- `GOOGLE_APPLICATION_CREDENTIALS`
-- `GOOGLE_OAUTH_CLIENT_ID`
-- `GOOGLE_OAUTH_CLIENT_SECRET`
-- `GOOGLE_OAUTH_REDIRECT_URI`
-- `FRONTEND_BASE_URL`
-- `APP_SESSION_SECRET`
-- `APP_SESSION_TTL_SECONDS`
-- `COOKIE_NAME`
-- `COOKIE_SECURE`
-- `COOKIE_SAMESITE`
-- `COOKIE_DOMAIN`
-- `CORS_ORIGINS`
-
-Frontend (`frontend/.env`):
-
-- `VITE_API_BASE_URL`
-
 ## Local Development
 
 ### Prerequisites
@@ -296,5 +281,6 @@ For cross-site frontend/backend deployments (for example Vercel + Cloud Run):
 |  |  |- context/
 |  |  `- lib/
 |  `- vite.config.js
+`- LICENSE
 `- README.md
 ```
