@@ -24,6 +24,9 @@ export default function Navbar() {
               <a href={sectionHref('features')} className="px-3 py-2 text-sm font-medium text-slate-700 hover:text-blue-900">
                 Features
               </a>
+              <a href={sectionHref('benchmark')} className="px-3 py-2 text-sm font-medium text-slate-700 hover:text-blue-900">
+                Benchmark
+              </a>
               <a href={sectionHref('workflow')} className="px-3 py-2 text-sm font-medium text-slate-700 hover:text-blue-900">
                 Workflow
               </a>
@@ -83,6 +86,9 @@ export default function Navbar() {
                 </a>
                 <a href={sectionHref('features')} className="rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-900" onClick={() => setIsMenuOpen(false)}>
                   Features
+                </a>
+                <a href={sectionHref('benchmark')} className="rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-900" onClick={() => setIsMenuOpen(false)}>
+                  Benchmark
                 </a>
                 <a href={sectionHref('workflow')} className="rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-900" onClick={() => setIsMenuOpen(false)}>
                   Workflow
