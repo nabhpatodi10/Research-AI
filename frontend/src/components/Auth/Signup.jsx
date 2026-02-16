@@ -193,7 +193,17 @@ export default function Signup() {
                   required
                   className="mt-0.5 h-4 w-4 rounded border-blue-200 text-blue-900 focus:ring-blue-500"
                 />
-                <span>I agree to the terms of service and privacy policy.</span>
+                <span>
+                  I agree to the terms of service and{' '}
+                  <Link
+                    to="/privacy-policy"
+                    className="font-semibold text-blue-900 underline decoration-blue-300 underline-offset-2 hover:text-blue-700"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    privacy policy
+                  </Link>
+                  .
+                </span>
               </label>
 
               <button

@@ -8,6 +8,7 @@ import Signup from './components/Auth/Signup';
 import Feedback from './components/Feedback';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
+import PrivacyPolicy from './components/PrivacyPolicy';
 
 const ChatInterface = lazy(() => import('./components/Chat/ChatInterface'));
 
@@ -22,6 +23,7 @@ function App() {
               <Route path="/" element={<Home />} />
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
+              <Route path="/privacy-policy" element={<PrivacyPolicy />} />
               <Route path="/feedback" element={<PrivateRoute><Feedback /></PrivateRoute>} />
               <Route
                 path="/chat"
