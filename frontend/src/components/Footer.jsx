@@ -24,6 +24,7 @@ export default function Footer() {
               <li><a href={sectionHref('benchmark')} className="text-slate-300 hover:text-white">Benchmark</a></li>
               <li><a href={sectionHref('workflow')} className="text-slate-300 hover:text-white">Workflow</a></li>
               <li><Link to="/feedback" className="text-slate-300 hover:text-white">Feedback</Link></li>
+              <li><Link to="/privacy-policy" className="text-slate-300 hover:text-white">Privacy Policy</Link></li>
             </ul>
           </div>
 
