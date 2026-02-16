@@ -64,6 +64,39 @@ h6,
   }
 }
 
+@keyframes benchmark-bar-grow {
+  0% {
+    opacity: 0.35;
+    transform: scaleY(0.04);
+  }
+  100% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes benchmark-fade-up {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.benchmark-bar {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: benchmark-bar-grow 0.72s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.benchmark-value,
+.benchmark-axis-label {
+  animation: benchmark-fade-up 0.45s ease-out both;
+}
+
 @layer utilities {
   .reveal-up {
     animation: fade-up 0.7s ease-out both;
@@ -104,7 +137,10 @@ h6,
 
 @media (prefers-reduced-motion: reduce) {
   .reveal-up,
-  .float-slow {
+  .float-slow,
+  .benchmark-bar,
+  .benchmark-value,
+  .benchmark-axis-label {
     animation: none !important;
   }
 }

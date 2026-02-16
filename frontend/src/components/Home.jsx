@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import OverallComparisonChart from './BenchmarkCharts/OverallComparisonChart';
+import ParameterComparisonChart from './BenchmarkCharts/ParameterComparisonChart';
 
 const featureCards = [
   {
@@ -187,6 +189,27 @@ export default function Home() {
                 <p className="mt-3 text-sm leading-6 text-slate-600">{feature.description}</p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="benchmark" className="bg-white">
+        <div className="max-w-6xl mx-auto px-4 py-18">
+          <p className="reveal-up text-sm uppercase tracking-[0.2em] font-semibold text-blue-700">Benchmark</p>
+          <h2 className="reveal-up delay-1 mt-3 text-3xl md:text-4xl font-bold text-slate-900">
+            DeepResearch Bench performance
+          </h2>
+          <p className="reveal-up delay-2 mt-4 max-w-3xl text-slate-600">
+            Live component-based visualizations of ResearchAI against Onyx, Qianfan, Tavily, Salesforce, LangChain, Gemini, and OpenAI DeepResearch.
+          </p>
+
+          <div className="mt-10 space-y-6">
+            <div className="reveal-up">
+              <OverallComparisonChart />
+            </div>
+            <div className="reveal-up delay-1">
+              <ParameterComparisonChart />
+            </div>
           </div>
         </div>
       </section>
