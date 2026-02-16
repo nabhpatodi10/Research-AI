@@ -67,18 +67,34 @@ export default function Navbar() {
           <div className="md:hidden flex items-center">
             <button
               onClick={() => setIsMenuOpen((open) => !open)}
-              className="text-slate-700 hover:text-blue-900 focus:outline-none"
-              aria-label="Toggle menu"
+              className="rounded-md p-1 text-slate-700 transition hover:bg-blue-50 hover:text-blue-900 focus:outline-none"
+              aria-label={isMenuOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={isMenuOpen}
+              aria-controls="navbar-mobile-menu"
             >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
+              <span className="relative block h-6 w-6">
+                <span
+                  className={`absolute left-0 h-0.5 w-6 rounded-full bg-current transition-all duration-200 ease-out ${
+                    isMenuOpen ? 'top-3 rotate-45' : 'top-1'
+                  }`}
+                />
+                <span
+                  className={`absolute left-0 top-3 h-0.5 w-6 rounded-full bg-current transition-all duration-200 ease-out ${
+                    isMenuOpen ? 'opacity-0' : 'opacity-100'
+                  }`}
+                />
+                <span
+                  className={`absolute left-0 h-0.5 w-6 rounded-full bg-current transition-all duration-200 ease-out ${
+                    isMenuOpen ? 'top-3 -rotate-45' : 'top-5'
+                  }`}
+                />
+              </span>
             </button>
           </div>
         </div>
 
         {isMenuOpen && (
-          <div className="md:hidden pb-4">
+          <div id="navbar-mobile-menu" className="md:hidden pb-4">
             <div className="rounded-xl border border-blue-100 bg-white p-3 shadow-sm">
               <div className="flex flex-col space-y-1">
                 <a href={sectionHref('home')} className="rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-900" onClick={() => setIsMenuOpen(false)}>
