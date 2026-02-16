@@ -95,6 +95,8 @@ const sanitizeChatSettings = (candidate) => {
   };
 };
 
+const isDesktopViewport = () => (typeof window !== 'undefined' ? window.innerWidth >= 768 : true);
+
 const SidebarContent = ({
   sessions,
   sessionsLoading,
@@ -176,16 +178,25 @@ function MessageBubble({ msg }) {
   const isUser = msg.sender === 'user';
   const isAssistant = msg.sender === 'ai';
   const isError = msg.sender === 'ai-error' || msg.sender === 'system-error';
-  const markdownVariant = isUser ? 'user' : isError ? 'error' : 'assistant';
+
+  if (isUser) {
+    return (
+      <div className="max-w-full overflow-hidden rounded-2xl bg-blue-900 text-white shadow-sm md:max-w-[78%]">
+        <div className="whitespace-pre-wrap break-words px-4 py-3 text-sm leading-6">
+          {msg.text}
+        </div>
+      </div>
+    );
+  }
+
+  const markdownVariant = isError ? 'error' : 'assistant';
 
   return (
     <div
       className={`max-w-full overflow-hidden rounded-2xl shadow-sm md:max-w-[78%] ${
-        isUser
-          ? 'bg-blue-900 text-white'
-          : isAssistant
-            ? 'border border-blue-100 bg-white text-slate-800'
-            : 'border border-red-200 bg-red-50 text-red-700'
+        isAssistant
+          ? 'border border-blue-100 bg-white text-slate-800'
+          : 'border border-red-200 bg-red-50 text-red-700'
       }`}
     >
       <MarkdownRenderer content={msg.text} variant={markdownVariant} />
@@ -233,7 +244,8 @@ export default function ChatInterface() {
   const [shareLoading, setShareLoading] = useState(false);
   const [shareError, setShareError] = useState('');
 
-  const [isSidebarOpen, setIsSidebarOpen] = useState(() => window.innerWidth >= 768);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => isDesktopViewport());
+  const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(() => isDesktopViewport());
   const [searchTerm, setSearchTerm] = useState('');
   const [composerError, setComposerError] = useState('');
   const [showCommandMenu, setShowCommandMenu] = useState(false);
@@ -799,7 +811,10 @@ export default function ChatInterface() {
         </Dialog>
       </Transition>
 
-      <div className={`fixed inset-x-0 bottom-0 top-16 z-40 flex md:hidden ${isSidebarOpen ? '' : 'pointer-events-none'}`}>
+      <div
+        id="mobile-chat-sidebar"
+        className={`fixed inset-x-0 bottom-0 top-16 z-40 flex md:hidden ${isSidebarOpen ? '' : 'pointer-events-none'}`}
+      >
         <div
           className={`fixed inset-x-0 bottom-0 top-16 bg-slate-900/35 transition-opacity ${isSidebarOpen ? 'opacity-100' : 'opacity-0'}`}
           onClick={() => setIsSidebarOpen(false)}
@@ -853,12 +868,28 @@ export default function ChatInterface() {
             <div className="flex min-w-0 items-center gap-2">
               <button
                 className="rounded-lg p-1.5 text-slate-600 transition hover:bg-blue-50 hover:text-blue-900 md:hidden"
-                onClick={() => setIsSidebarOpen(true)}
-                aria-label="Open sidebar"
+                onClick={() => setIsSidebarOpen((value) => !value)}
+                aria-label={isSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+                aria-expanded={isSidebarOpen}
+                aria-controls="mobile-chat-sidebar"
               >
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
+                <span className="relative block h-5 w-5">
+                  <span
+                    className={`absolute left-0 h-0.5 w-5 rounded-full bg-current transition-all duration-200 ease-out ${
+                      isSidebarOpen ? 'top-2.5 rotate-45' : 'top-1'
+                    }`}
+                  />
+                  <span
+                    className={`absolute left-0 top-2.5 h-0.5 w-5 rounded-full bg-current transition-all duration-200 ease-out ${
+                      isSidebarOpen ? 'opacity-0' : 'opacity-100'
+                    }`}
+                  />
+                  <span
+                    className={`absolute left-0 h-0.5 w-5 rounded-full bg-current transition-all duration-200 ease-out ${
+                      isSidebarOpen ? 'top-2.5 -rotate-45' : 'top-4'
+                    }`}
+                  />
+                </span>
               </button>
 
               <button
@@ -975,58 +1006,103 @@ export default function ChatInterface() {
         <footer className="border-t border-blue-100/90 bg-white/80 px-4 py-4 backdrop-blur-md md:px-8 md:py-5">
           <form onSubmit={handleSend} className="mx-auto w-full max-w-5xl">
             <div className="rounded-2xl border border-blue-100 bg-white p-2 shadow-sm">
-              <div className="grid gap-2 px-1 pb-2 sm:grid-cols-2 lg:grid-cols-4">
-                <label className="flex flex-col gap-1 rounded-xl border border-blue-100 bg-blue-50/30 px-2.5 py-2">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-800">Model</span>
-                  <select
-                    value={chatSettings.model}
-                    onChange={(event) => updateChatSetting('model', event.target.value)}
-                    disabled={chatLoading || isGeneratingResponse}
-                    className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+              <div className="px-1 pb-2">
+                <button
+                  type="button"
+                  onClick={() => setIsSettingsPanelOpen((value) => !value)}
+                  aria-expanded={isSettingsPanelOpen}
+                  aria-controls="chat-settings-panel"
+                  className="flex w-full items-center justify-between rounded-xl border border-blue-100 bg-blue-50/40 px-3 py-2 text-left transition hover:bg-blue-50"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-800">
+                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 21v-7m0 0a2 2 0 1 1 4 0m-4 0a2 2 0 1 0 4 0m6 7v-8m0 0a2 2 0 1 1 4 0m-4 0a2 2 0 1 0 4 0M8 7V3m0 4a2 2 0 1 1 4 0M8 7a2 2 0 1 0 4 0" />
+                      </svg>
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-blue-900">Research Parameters</p>
+                      <p className="truncate text-[11px] text-slate-500">
+                        Model: {chatSettings.model} | Breadth: {chatSettings.research_breadth} | Depth: {chatSettings.research_depth} | Length: {chatSettings.document_length}
+                      </p>
+                    </div>
+                  </div>
+                  <svg
+                    className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${isSettingsPanelOpen ? '' : 'rotate-180'}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
                   >
-                    <option value="mini">Mini</option>
-                    <option value="pro">Pro</option>
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1 rounded-xl border border-blue-100 bg-blue-50/30 px-2.5 py-2">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-800">Breadth</span>
-                  <select
-                    value={chatSettings.research_breadth}
-                    onChange={(event) => updateChatSetting('research_breadth', event.target.value)}
-                    disabled={chatLoading || isGeneratingResponse}
-                    className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1 rounded-xl border border-blue-100 bg-blue-50/30 px-2.5 py-2">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-800">Depth</span>
-                  <select
-                    value={chatSettings.research_depth}
-                    onChange={(event) => updateChatSetting('research_depth', event.target.value)}
-                    disabled={chatLoading || isGeneratingResponse}
-                    className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-                  >
-                    <option value="low">Low</option>
-                    <option value="high">High</option>
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1 rounded-xl border border-blue-100 bg-blue-50/30 px-2.5 py-2">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-800">Document Length</span>
-                  <select
-                    value={chatSettings.document_length}
-                    onChange={(event) => updateChatSetting('document_length', event.target.value)}
-                    disabled={chatLoading || isGeneratingResponse}
-                    className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                  </select>
-                </label>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m19 9-7 7-7-7" />
+                  </svg>
+                </button>
               </div>
+
+              <Transition
+                as={Fragment}
+                show={isSettingsPanelOpen}
+                enter="transition-[max-height,opacity,transform] duration-300 ease-out"
+                enterFrom="max-h-0 -translate-y-1 opacity-0"
+                enterTo="max-h-[24rem] translate-y-0 opacity-100"
+                leave="transition-[max-height,opacity,transform] duration-200 ease-in"
+                leaveFrom="max-h-[24rem] translate-y-0 opacity-100"
+                leaveTo="max-h-0 -translate-y-1 opacity-0"
+              >
+                <div id="chat-settings-panel" className="overflow-hidden">
+                  <div className="grid gap-2 px-1 pb-2 sm:grid-cols-2 lg:grid-cols-4">
+                    <label className="flex flex-col gap-1 rounded-xl border border-blue-100 bg-blue-50/30 px-2.5 py-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-800">Model</span>
+                      <select
+                        value={chatSettings.model}
+                        onChange={(event) => updateChatSetting('model', event.target.value)}
+                        disabled={chatLoading || isGeneratingResponse}
+                        className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                      >
+                        <option value="mini">Mini</option>
+                        <option value="pro">Pro</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 rounded-xl border border-blue-100 bg-blue-50/30 px-2.5 py-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-800">Breadth</span>
+                      <select
+                        value={chatSettings.research_breadth}
+                        onChange={(event) => updateChatSetting('research_breadth', event.target.value)}
+                        disabled={chatLoading || isGeneratingResponse}
+                        className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 rounded-xl border border-blue-100 bg-blue-50/30 px-2.5 py-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-800">Depth</span>
+                      <select
+                        value={chatSettings.research_depth}
+                        onChange={(event) => updateChatSetting('research_depth', event.target.value)}
+                        disabled={chatLoading || isGeneratingResponse}
+                        className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                      >
+                        <option value="low">Low</option>
+                        <option value="high">High</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 rounded-xl border border-blue-100 bg-blue-50/30 px-2.5 py-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-800">Document Length</span>
+                      <select
+                        value={chatSettings.document_length}
+                        onChange={(event) => updateChatSetting('document_length', event.target.value)}
+                        disabled={chatLoading || isGeneratingResponse}
+                        className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+              </Transition>
 
               <div className="relative flex items-end gap-2">
                 <textarea
