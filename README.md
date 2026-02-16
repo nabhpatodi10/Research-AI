@@ -26,6 +26,16 @@ ResearchAI was evaluated on the [DeepResearch Bench](https://github.com/Ayanami0
 
 With these results, ResearchAI is at the **1st position on the leaderboard of DeepResearch Bench**.
 
+### Leaderboard Comparison Graphs
+
+#### Overall Score Comparison
+
+![DeepResearch Overall Comparison](backend/Images/deepresearch_overall_comparison.png)
+
+#### Parameter-wise Comparison
+
+![DeepResearch Parameter Comparison](backend/Images/deepresearch_all_parameters_comparison.png)
+
 ## Current Architecture
 
 ### Backend (`backend/`)
