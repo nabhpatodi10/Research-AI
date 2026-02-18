@@ -4,6 +4,7 @@ import traceback
 from fastapi import APIRouter, Depends, HTTPException, Request
 from langchain.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
+from pydantic import BaseModel
 
 from agent import Agent, build_research_handoff_context
 from api.models import (
@@ -14,7 +15,11 @@ from api.models import (
     ChatSession,
     ChatSessionsResponse,
     OkResponse,
+    ResearchResultResponse,
+    ResearchStatusResponse,
     RenameSessionRequest,
+    SessionTask,
+    SessionTaskStatusResponse,
     SessionMutationResponse,
     SessionUser,
     ShareSessionRequest,
@@ -27,6 +32,15 @@ from nodes import Nodes
 router = APIRouter(tags=["chat"])
 
 RESEARCH_COMMAND_PATTERN = re.compile(r"^\s*/research(?:\s+(?P<topic>[\s\S]*))?$", re.IGNORECASE)
+AUTO_RESEARCH_TRIGGER_PATTERN = re.compile(
+    r"\b(research|deep\s*dive|analy[sz]e|analysis|compare|comparison|benchmark|report|whitepaper|citations?|sources?)\b",
+    re.IGNORECASE,
+)
+
+
+class AutoResearchDecision(BaseModel):
+    should_handoff: bool = False
+    confidence: float = 0.0
 
 
 def _parse_research_command(user_input: str) -> tuple[bool, str]:
@@ -41,6 +55,123 @@ def _resolve_chat_model(request: Request, model_tier: str) -> BaseChatModel:
     if model_tier == "mini":
         return request.app.state.chat_model_mini
     return request.app.state.chat_model
+
+
+def _looks_like_auto_research_candidate(user_input: str) -> bool:
+    text = str(user_input or "").strip()
+    if not text:
+        return False
+
+    if len(text) >= 220:
+        return True
+
+    if AUTO_RESEARCH_TRIGGER_PATTERN.search(text):
+        return True
+
+    if text.count("\n") >= 3:
+        return True
+
+    return False
+
+
+async def _maybe_auto_research_handoff_payload(
+    request: Request,
+    session_id: str,
+    user_input: str,
+) -> str | None:
+    trimmed = str(user_input or "").strip()
+    if not _looks_like_auto_research_candidate(trimmed):
+        return None
+
+    decision_messages = [
+        HumanMessage(
+            content=(
+                "Decide if this user message should be handed off to a long-running deep research pipeline.\n"
+                "Return should_handoff=true only when the request needs broad multi-source synthesis, "
+                "comparative benchmarking, report-style output with citations/sources, or exhaustive analysis.\n"
+                "Return should_handoff=false for direct Q&A, short factual answers, normal coding/debug help, "
+                "or requests that can be answered quickly in one assistant response.\n\n"
+                f"User message:\n{trimmed}"
+            )
+        )
+    ]
+
+    try:
+        decision = await request.app.state.chat_model_mini.with_structured_output(
+            AutoResearchDecision
+        ).ainvoke(decision_messages)
+    except Exception:
+        return None
+
+    if not isinstance(decision, AutoResearchDecision):
+        return None
+    if not decision.should_handoff:
+        return None
+    if float(decision.confidence or 0.0) < 0.55:
+        return None
+
+    handoff_context = await build_research_handoff_context(
+        database=request.app.state.database,
+        session_id=session_id,
+        model=request.app.state.chat_model,
+        additional_user_context=trimmed,
+    )
+    return handoff_context or trimmed
+
+
+def _normalize_research_status(status: str) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in {"queued", "running", "completed", "failed"}:
+        return normalized
+    return "failed"
+
+
+async def _get_active_research_task(
+    request: Request,
+    user_id: str,
+    session_id: str,
+) -> dict[str, str] | None:
+    active_task = await request.app.state.database.get_user_session_active_task(user_id, session_id)
+    if not isinstance(active_task, dict):
+        return None
+
+    task_id = str(active_task.get("id") or "").strip()
+    task_type = str(active_task.get("type") or "").strip().lower()
+    if not task_id or task_type != "research":
+        await request.app.state.database.set_user_session_active_task(user_id, session_id, None)
+        return None
+
+    job = await request.app.state.database.get_research_job_for_user(task_id, user_id)
+    if job is None:
+        await request.app.state.database.clear_user_session_active_task_if_matches(
+            user_id=user_id,
+            session_id=session_id,
+            task_id=task_id,
+        )
+        return None
+
+    job_status = _normalize_research_status(job.get("status", ""))
+    if job_status in {"completed", "failed"}:
+        await request.app.state.database.clear_user_session_active_task_if_matches(
+            user_id=user_id,
+            session_id=session_id,
+            task_id=task_id,
+        )
+        return None
+
+    if job_status != str(active_task.get("status") or "").strip().lower():
+        await request.app.state.database.set_user_session_active_task_status(
+            user_id=user_id,
+            session_id=session_id,
+            task_id=task_id,
+            status=job_status,
+        )
+
+    return {
+        "id": task_id,
+        "type": "research",
+        "status": job_status,
+    }
 
 
 @router.get("/chat/sessions", response_model=ChatSessionsResponse)
@@ -125,6 +256,103 @@ async def share_chat_session(
     return OkResponse(ok=True)
 
 
+@router.get("/chat/sessions/{session_id}/task-status", response_model=SessionTaskStatusResponse)
+async def get_chat_session_task_status(
+    session_id: str,
+    request: Request,
+    current_user: SessionUser = Depends(get_current_user),
+):
+    has_access = await request.app.state.database.user_has_session(current_user.id, session_id)
+    if not has_access:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    active_task = await _get_active_research_task(
+        request=request,
+        user_id=current_user.id,
+        session_id=session_id,
+    )
+    if active_task is None:
+        return SessionTaskStatusResponse(session_id=session_id, active_task=None)
+
+    return SessionTaskStatusResponse(
+        session_id=session_id,
+        active_task=SessionTask(**active_task),
+    )
+
+
+@router.get("/chat/research/{research_id}/status", response_model=ResearchStatusResponse)
+async def get_research_status(
+    research_id: str,
+    request: Request,
+    current_user: SessionUser = Depends(get_current_user),
+):
+    job = await request.app.state.database.get_research_job_for_user(research_id, current_user.id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Research task not found.")
+
+    session_id = str(job.get("sessionId") or "").strip()
+    if not session_id:
+        raise HTTPException(status_code=404, detail="Research task not found.")
+    has_access = await request.app.state.database.user_has_session(current_user.id, session_id)
+    if not has_access:
+        raise HTTPException(status_code=404, detail="Research task not found.")
+
+    status = _normalize_research_status(str(job.get("status") or ""))
+    if status in {"completed", "failed"}:
+        await request.app.state.database.clear_user_session_active_task_if_matches(
+            user_id=current_user.id,
+            session_id=session_id,
+            task_id=research_id,
+        )
+
+    return ResearchStatusResponse(
+        research_id=research_id,
+        session_id=session_id,
+        status=status,
+        error=(str(job.get("error")) if job.get("error") else None),
+    )
+
+
+@router.get("/chat/research/{research_id}/result", response_model=ResearchResultResponse)
+async def get_research_result(
+    research_id: str,
+    request: Request,
+    current_user: SessionUser = Depends(get_current_user),
+):
+    job = await request.app.state.database.get_research_job_for_user(research_id, current_user.id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Research task not found.")
+
+    session_id = str(job.get("sessionId") or "").strip()
+    if not session_id:
+        raise HTTPException(status_code=404, detail="Research task not found.")
+    has_access = await request.app.state.database.user_has_session(current_user.id, session_id)
+    if not has_access:
+        raise HTTPException(status_code=404, detail="Research task not found.")
+
+    status = _normalize_research_status(str(job.get("status") or ""))
+    if status != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Research is not complete yet. Current status: {status}.",
+        )
+
+    response_text = str(job.get("resultText") or "").strip()
+    if not response_text:
+        raise HTTPException(status_code=404, detail="Research result is empty.")
+
+    await request.app.state.database.clear_user_session_active_task_if_matches(
+        user_id=current_user.id,
+        session_id=session_id,
+        task_id=research_id,
+    )
+    return ResearchResultResponse(
+        research_id=research_id,
+        session_id=session_id,
+        response=response_text,
+    )
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(
     request_body: ChatRequest,
@@ -147,6 +375,16 @@ async def chat_endpoint(
                 current_user.id,
                 session_id,
             )
+            active_task = await _get_active_research_task(
+                request=request,
+                user_id=current_user.id,
+                session_id=session_id,
+            )
+            if active_task is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="A research task is already running for this session. Wait for it to finish.",
+                )
 
         ask_research_topic_only = False
         force_research_payload: str | None = None
@@ -201,6 +439,13 @@ async def chat_endpoint(
             if not trimmed_user_input:
                 raise HTTPException(status_code=400, detail="Message cannot be empty.")
             effective_user_input = trimmed_user_input
+            auto_handoff_payload = await _maybe_auto_research_handoff_payload(
+                request=request,
+                session_id=session_id,
+                user_input=trimmed_user_input,
+            )
+            if auto_handoff_payload:
+                force_research_payload = auto_handoff_payload
 
         if not request_body.session_id:
             title_seed = effective_user_input if effective_user_input != "/research" else "Research Request"
@@ -228,9 +473,36 @@ async def chat_endpoint(
                 False,
             )
 
+        should_queue_research = bool(force_research_payload) and not ask_research_topic_only
         system_prompt = Nodes().chat_agent()
         user_message = HumanMessage(content=effective_user_input)
         await request.app.state.database.add_messages(session_id, [user_message])
+
+        if should_queue_research:
+            research_id = await request.app.state.database.enqueue_research_job(
+                user_id=current_user.id,
+                session_id=session_id,
+                research_idea=str(force_research_payload or effective_user_input),
+                model_tier=request_body.model,
+                research_breadth=request_body.research_breadth,
+                research_depth=request_body.research_depth,
+                document_length=request_body.document_length,
+            )
+            await request.app.state.database.set_user_session_active_task(
+                user_id=current_user.id,
+                session_id=session_id,
+                task={
+                    "id": research_id,
+                    "type": "research",
+                    "status": "queued",
+                },
+            )
+            return ChatResponse(
+                session_id=session_id,
+                research_id=research_id,
+                status="queued",
+            )
+
         state = {"messages": [user_message]}
         selected_chat_model = _resolve_chat_model(request, request_body.model)
         chat_agent = Agent(
@@ -245,6 +517,7 @@ async def chat_endpoint(
             document_length=request_body.document_length,
             force_research_payload=force_research_payload,
             ask_research_topic_only=ask_research_topic_only,
+            allow_research_handoff=False,
         )
         result = await chat_agent.graph.ainvoke(state)
         final_document = result.get("final_document")
@@ -253,13 +526,27 @@ async def chat_endpoint(
         except Exception:
              pass
         if final_document:
-            return ChatResponse(session_id=session_id, response=str(final_document))
+            return ChatResponse(
+                session_id=session_id,
+                response=str(final_document),
+                status="completed",
+            )
 
         final_messages = result.get("messages", [])
         if not final_messages:
             raise Exception("No response from chat agent")
-        response_text = final_messages[-1].text
-        return ChatResponse(session_id=session_id, response=response_text)
+        response_text = str(
+            getattr(final_messages[-1], "text", "")
+            or getattr(final_messages[-1], "content", "")
+            or ""
+        ).strip()
+        if not response_text:
+            raise Exception("No text response from chat agent")
+        return ChatResponse(
+            session_id=session_id,
+            response=response_text,
+            status="completed",
+        )
     except HTTPException:
         raise
     except Exception as error:
