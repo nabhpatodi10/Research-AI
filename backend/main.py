@@ -20,6 +20,7 @@ from api.session import parse_bool
 from auth_service import FirebaseAuthService
 from custom_search import CustomSearch
 from database import Database
+from pdf_processing import PdfBackgroundWorker, PdfProcessingService
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -30,6 +31,10 @@ async def lifespan(app: FastAPI):
     app.state.browser = await app.state.playwright.chromium.launch(headless=True)
     app.state.custom_search = CustomSearch()
     app.state.database = Database()
+    app.state.pdf_background_worker = PdfBackgroundWorker(app.state.database)
+    app.state.pdf_worker_task = asyncio.create_task(
+        app.state.pdf_background_worker.run_forever()
+    )
     app.state.chat_model = ChatGoogleGenerativeAI(
         model="gemini-3-flash-preview",
         thinking_level="minimal",
@@ -52,8 +57,14 @@ async def lifespan(app: FastAPI):
         cookie_samesite = "lax"
     app.state.cookie_samesite = cookie_samesite
     yield
+    pdf_worker_task = getattr(app.state, "pdf_worker_task", None)
+    if pdf_worker_task is not None:
+        pdf_worker_task.cancel()
+        await asyncio.gather(pdf_worker_task, return_exceptions=True)
+
     await app.state.browser.close()
     await app.state.playwright.stop()
+    await PdfProcessingService.aclose_shared_client()
     await CustomSearch.aclose()
     app.state.database.close_connection()
 
