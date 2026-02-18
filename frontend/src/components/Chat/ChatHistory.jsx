@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+
+const LONG_PRESS_DELAY_MS = 420;
 
 export default function ChatHistory({
   sessions = [],
@@ -12,6 +14,37 @@ export default function ChatHistory({
   searchTerm = '',
 }) {
   const [openMenuId, setOpenMenuId] = useState(null);
+  const longPressTimerRef = useRef(null);
+  const longPressTriggeredRef = useRef(false);
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current === null) return;
+    window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
+  };
+
+  const startLongPress = (sessionId, pointerType = '') => {
+    if (pointerType !== 'touch' && pointerType !== 'pen') return;
+
+    clearLongPressTimer();
+    longPressTriggeredRef.current = false;
+
+    longPressTimerRef.current = window.setTimeout(() => {
+      setOpenMenuId(sessionId);
+      longPressTriggeredRef.current = true;
+
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        navigator.vibrate(10);
+      }
+    }, LONG_PRESS_DELAY_MS);
+  };
+
+  useEffect(
+    () => () => {
+      clearLongPressTimer();
+    },
+    []
+  );
 
   useEffect(() => {
     if (!openMenuId) return undefined;
@@ -20,6 +53,7 @@ export default function ChatHistory({
       const menuRoot = event.target.closest('[data-chat-menu-root="true"]');
       if (!menuRoot) {
         setOpenMenuId(null);
+        longPressTriggeredRef.current = false;
       }
     };
 
@@ -75,7 +109,27 @@ export default function ChatHistory({
             role="button"
             tabIndex={0}
             data-chat-menu-root="true"
-            onClick={() => onChatSelect?.(session.id)}
+            onClick={(event) => {
+              if (longPressTriggeredRef.current) {
+                event.preventDefault();
+                event.stopPropagation();
+                longPressTriggeredRef.current = false;
+                return;
+              }
+              onChatSelect?.(session.id);
+            }}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              startLongPress(session.id, event.pointerType);
+            }}
+            onPointerMove={() => clearLongPressTimer()}
+            onPointerUp={() => clearLongPressTimer()}
+            onPointerCancel={() => clearLongPressTimer()}
+            onPointerLeave={() => clearLongPressTimer()}
+            onContextMenu={(event) => {
+              if (!longPressTriggeredRef.current) return;
+              event.preventDefault();
+            }}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
@@ -95,12 +149,17 @@ export default function ChatHistory({
             <button
               type="button"
               aria-label="Chat options"
-              className={`absolute right-2 top-2 h-6 w-6 rounded-md flex items-center justify-center text-slate-500 hover:bg-blue-100 hover:text-blue-900 ${
-                openMenuId === session.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              className={`absolute right-2 top-2 h-6 w-6 rounded-md flex items-center justify-center text-slate-500 hover:bg-blue-100 hover:text-blue-900 transition-opacity ${
+                openMenuId === session.id
+                  ? 'opacity-100'
+                  : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
               }`}
               onClick={(event) => {
                 event.stopPropagation();
                 setOpenMenuId((prev) => (prev === session.id ? null : session.id));
+              }}
+              onPointerDown={(event) => {
+                event.stopPropagation();
               }}
             >
               <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
