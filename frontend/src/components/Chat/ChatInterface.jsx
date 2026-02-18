@@ -71,7 +71,7 @@ const DEFAULT_CHAT_SETTINGS = {
 const VALID_CHAT_SETTING_VALUES = {
   model: new Set(['mini', 'pro']),
   research_breadth: new Set(['low', 'medium', 'high']),
-  research_depth: new Set(['low', 'high']),
+  research_depth: new Set(['low', 'medium', 'high']),
   document_length: new Set(['low', 'medium', 'high']),
 };
 
@@ -1142,6 +1142,7 @@ export default function ChatInterface() {
                         className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
                       >
                         <option value="low">Low</option>
+                        <option value="medium">Medium</option>
                         <option value="high">High</option>
                       </select>
                     </label>

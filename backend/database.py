@@ -4,7 +4,7 @@ load_dotenv()
 import asyncio
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from google.cloud import firestore as firestore_module
@@ -75,6 +75,258 @@ class Database:
 
     async def clear_vector_store(self, session_id: str, batch_size: int = 5000) -> int | None:
         return await asyncio.to_thread(self._clear_vector_store_sync, session_id, batch_size)
+
+    def _delete_vector_source_sync(
+        self,
+        session_id: str,
+        source_url: str,
+        batch_size: int = 500,
+    ) -> int:
+        if not source_url:
+            return 0
+
+        collection_ref = self.__firestore_client.collection("vector")
+        session_filter = FieldFilter("metadata.session_id", "==", session_id)
+        base_query = (
+            collection_ref.where(filter=session_filter)
+            .order_by("__name__")
+            .limit(batch_size)
+        )
+
+        deleted = 0
+        last_doc = None
+        while True:
+            query = base_query if last_doc is None else base_query.start_after(last_doc)
+            docs = list(query.stream())
+            if not docs:
+                break
+
+            batch = self.__firestore_client.batch()
+            batch_count = 0
+            for doc in docs:
+                payload = doc.to_dict() or {}
+                metadata = payload.get("metadata")
+                source = ""
+                if isinstance(metadata, dict):
+                    source = str(metadata.get("source") or "")
+                if source != source_url:
+                    continue
+                batch.delete(doc.reference)
+                batch_count += 1
+
+            if batch_count > 0:
+                batch.commit()
+                deleted += batch_count
+
+            last_doc = docs[-1]
+
+        return deleted
+
+    async def replace_source_data(
+        self,
+        session_id: str,
+        source_url: str,
+        documents: list[Document],
+    ) -> None:
+        await asyncio.to_thread(
+            self._delete_vector_source_sync,
+            session_id,
+            source_url,
+        )
+        await self.add_data(session_id, documents)
+
+    async def enqueue_pdf_processing_job(
+        self,
+        session_id: str,
+        source_url: str,
+        title: str,
+        reason: str,
+        partial_text_available: bool,
+    ) -> str:
+        return await asyncio.to_thread(
+            self._enqueue_pdf_processing_job_sync,
+            session_id,
+            source_url,
+            title,
+            reason,
+            partial_text_available,
+        )
+
+    def _enqueue_pdf_processing_job_sync(
+        self,
+        session_id: str,
+        source_url: str,
+        title: str,
+        reason: str,
+        partial_text_available: bool,
+    ) -> str:
+        now = datetime.now(timezone.utc)
+        job_id = str(uuid7())
+        payload = {
+            "sessionId": session_id,
+            "sourceUrl": source_url,
+            "title": str(title or source_url),
+            "status": "queued",
+            "attempts": 0,
+            "reason": str(reason or "primary_timeout"),
+            "partialTextAvailable": bool(partial_text_available),
+            "createdAt": now,
+            "updatedAt": now,
+            "nextRunAt": now,
+            "lastError": None,
+            "workerId": None,
+        }
+        self.__firestore_client.collection("pdf_processing_jobs").document(job_id).set(payload)
+        return job_id
+
+    async def claim_pdf_processing_jobs(
+        self,
+        worker_id: str,
+        limit: int = 2,
+    ) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(
+            self._claim_pdf_processing_jobs_sync,
+            worker_id,
+            limit,
+        )
+
+    def _claim_pdf_processing_jobs_sync(
+        self,
+        worker_id: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+
+        now = datetime.now(timezone.utc)
+        pending_query = (
+            self.__firestore_client.collection("pdf_processing_jobs")
+            .where(filter=FieldFilter("status", "==", "queued"))
+            .limit(max(limit * 3, limit))
+        )
+
+        claimed: list[dict[str, Any]] = []
+        for doc in pending_query.stream():
+            data = doc.to_dict() or {}
+            next_run = self._as_datetime(data.get("nextRunAt")) or now
+            if next_run > now:
+                continue
+
+            try:
+                doc.reference.update(
+                    {
+                        "status": "running",
+                        "workerId": worker_id,
+                        "updatedAt": now,
+                        "startedAt": now,
+                    }
+                )
+            except Exception:
+                continue
+
+            data["id"] = doc.id
+            claimed.append(data)
+            if len(claimed) >= limit:
+                break
+
+        return claimed
+
+    async def mark_pdf_processing_job_completed(
+        self,
+        job_id: str,
+        characters: int,
+        page_count: int,
+    ) -> None:
+        await asyncio.to_thread(
+            self._mark_pdf_processing_job_completed_sync,
+            job_id,
+            characters,
+            page_count,
+        )
+
+    def _mark_pdf_processing_job_completed_sync(
+        self,
+        job_id: str,
+        characters: int,
+        page_count: int,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        self.__firestore_client.collection("pdf_processing_jobs").document(job_id).update(
+            {
+                "status": "completed",
+                "updatedAt": now,
+                "completedAt": now,
+                "resultCharacters": int(max(characters, 0)),
+                "resultPageCount": int(max(page_count, 0)),
+                "lastError": None,
+            }
+        )
+
+    async def mark_pdf_processing_job_failed(
+        self,
+        job_id: str,
+        error_message: str,
+        attempts: int,
+    ) -> None:
+        await asyncio.to_thread(
+            self._mark_pdf_processing_job_failed_sync,
+            job_id,
+            error_message,
+            attempts,
+        )
+
+    def _mark_pdf_processing_job_failed_sync(
+        self,
+        job_id: str,
+        error_message: str,
+        attempts: int,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        self.__firestore_client.collection("pdf_processing_jobs").document(job_id).update(
+            {
+                "status": "failed",
+                "updatedAt": now,
+                "failedAt": now,
+                "attempts": int(max(attempts, 0)),
+                "lastError": str(error_message or "Unknown PDF processing error."),
+            }
+        )
+
+    async def requeue_pdf_processing_job(
+        self,
+        job_id: str,
+        attempts: int,
+        error_message: str,
+        delay_seconds: float,
+    ) -> None:
+        await asyncio.to_thread(
+            self._requeue_pdf_processing_job_sync,
+            job_id,
+            attempts,
+            error_message,
+            delay_seconds,
+        )
+
+    def _requeue_pdf_processing_job_sync(
+        self,
+        job_id: str,
+        attempts: int,
+        error_message: str,
+        delay_seconds: float,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        delay = max(float(delay_seconds or 0.0), 0.0)
+        next_run = now + timedelta(seconds=delay)
+        self.__firestore_client.collection("pdf_processing_jobs").document(job_id).update(
+            {
+                "status": "queued",
+                "updatedAt": now,
+                "attempts": int(max(attempts, 0)),
+                "nextRunAt": next_run,
+                "lastError": str(error_message or "Unknown PDF processing error."),
+                "workerId": None,
+            }
+        )
 
     async def add_data(self, session_id: str, documents: list[Document]) -> None:
         if not documents:
