@@ -60,6 +60,39 @@ function normalizeChartHeight(value) {
   return Math.max(MIN_CHART_HEIGHT, Math.min(MAX_CHART_HEIGHT, numeric));
 }
 
+function normalizeLegacyChartPayload(payload) {
+  if (!isPlainObject(payload)) {
+    return payload;
+  }
+
+  const titleField = payload.title;
+  const hasLegacyTitleObject =
+    isPlainObject(titleField) && typeof titleField.text === 'string';
+
+  if (!hasLegacyTitleObject) {
+    return payload;
+  }
+
+  const normalized = {
+    ...payload,
+    title: String(titleField.text),
+  };
+
+  // Backward compatibility: allow raw ECharts config at top-level when title is an object.
+  if (!isPlainObject(payload.option)) {
+    const option = {};
+    for (const [key, value] of Object.entries(payload)) {
+      if (key === 'title' || key === 'caption' || key === 'height') continue;
+      option[key] = value;
+    }
+    if (Object.keys(option).length > 0) {
+      normalized.option = option;
+    }
+  }
+
+  return normalized;
+}
+
 function validateChartPayload(payload) {
   if (!isPlainObject(payload)) {
     return 'Chart payload must be a JSON object.';
@@ -95,7 +128,8 @@ function parseChartSpec(specSource) {
   }
 
   try {
-    const payload = JSON.parse(raw);
+    const parsedPayload = JSON.parse(raw);
+    const payload = normalizeLegacyChartPayload(parsedPayload);
     const validationError = validateChartPayload(payload);
     if (validationError) {
       return { raw, error: validationError };
