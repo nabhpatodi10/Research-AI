@@ -350,6 +350,15 @@
   text-align: left;
 }
 
+.markdown-body .katex-error {
+  display: none !important;
+}
+
+.markdown-body span.math-inline:empty,
+.markdown-body span.math-display:empty {
+  display: none !important;
+}
+
 .markdown-body.markdown-body--user .katex,
 .markdown-body.markdown-body--user .katex .base {
   color: #eff6ff;
