@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { apiRequest } from '../../lib/api';
 import ChatHistory from './ChatHistory';
 import MarkdownRenderer from './MarkdownRenderer';
+import RichAssistantMessage from './RichAssistantMessage';
 
 const createClientMessageId = () => {
   const uuid = globalThis.crypto?.randomUUID?.();
@@ -97,6 +98,16 @@ const sanitizeChatSettings = (candidate) => {
 
 const isDesktopViewport = () => (typeof window !== 'undefined' ? window.innerWidth >= 768 : true);
 
+const findLastUserMessageIndex = (items) => {
+  if (!Array.isArray(items) || items.length === 0) return -1;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (items[index]?.sender === 'user') {
+      return index;
+    }
+  }
+  return -1;
+};
+
 const SidebarContent = ({
   sessions,
   sessionsLoading,
@@ -177,7 +188,6 @@ function MessageBubble({ msg }) {
 
   const isUser = msg.sender === 'user';
   const isAssistant = msg.sender === 'ai';
-  const isError = msg.sender === 'ai-error' || msg.sender === 'system-error';
 
   if (isUser) {
     return (
@@ -189,16 +199,18 @@ function MessageBubble({ msg }) {
     );
   }
 
-  const markdownVariant = isError ? 'error' : 'assistant';
+  if (isAssistant) {
+    return (
+      <div className="max-w-full overflow-hidden rounded-2xl border border-blue-100 bg-white text-slate-800 shadow-sm md:max-w-[78%]">
+        <RichAssistantMessage content={msg.text} />
+      </div>
+    );
+  }
+
+  const markdownVariant = 'error';
 
   return (
-    <div
-      className={`max-w-full overflow-hidden rounded-2xl shadow-sm md:max-w-[78%] ${
-        isAssistant
-          ? 'border border-blue-100 bg-white text-slate-800'
-          : 'border border-red-200 bg-red-50 text-red-700'
-      }`}
-    >
+    <div className="max-w-full overflow-hidden rounded-2xl border border-red-200 bg-red-50 text-red-700 shadow-sm md:max-w-[78%]">
       <MarkdownRenderer content={msg.text} variant={markdownVariant} />
     </div>
   );
@@ -255,7 +267,10 @@ export default function ChatInterface() {
   const sessionIdRef = useRef(sessionId);
   const isGeneratingRef = useRef(false);
   const composerRef = useRef(null);
+  const chatScrollContainerRef = useRef(null);
   const commandTokenRangeRef = useRef({ start: 0, end: 0 });
+  const shouldScrollToLoadedUserMessageRef = useRef(false);
+  const loadedUserMessageIndexRef = useRef(-1);
 
   const applySessionTitleFromList = useCallback((allSessions, targetSessionId) => {
     if (!targetSessionId) return;
@@ -315,6 +330,38 @@ export default function ChatInterface() {
       // Ignore localStorage persistence errors.
     }
   }, [chatSettings]);
+
+  useEffect(() => {
+    if (!shouldScrollToLoadedUserMessageRef.current || chatLoading) return;
+    const container = chatScrollContainerRef.current;
+    if (!container) return;
+
+    let targetNode = null;
+    const targetIndex = loadedUserMessageIndexRef.current;
+
+    if (Number.isInteger(targetIndex) && targetIndex >= 0) {
+      targetNode = container.querySelector(`[data-message-index="${targetIndex}"]`);
+    }
+
+    if (!targetNode) {
+      const userNodes = container.querySelectorAll('[data-message-sender="user"]');
+      if (userNodes.length > 0) {
+        targetNode = userNodes[userNodes.length - 1];
+      }
+    }
+
+    if (targetNode) {
+      const containerRect = container.getBoundingClientRect();
+      const targetRect = targetNode.getBoundingClientRect();
+      const nextScrollTop = targetRect.top - containerRect.top + container.scrollTop - 12;
+      container.scrollTop = Math.max(0, nextScrollTop);
+    } else {
+      container.scrollTop = container.scrollHeight;
+    }
+
+    shouldScrollToLoadedUserMessageRef.current = false;
+    loadedUserMessageIndexRef.current = -1;
+  }, [messages, chatLoading]);
 
   const updateChatSetting = (key, value) => {
     setChatSettings((prev) =>
@@ -394,6 +441,8 @@ export default function ChatInterface() {
     setShareError('');
     setComposerError('');
     closeCommandMenu();
+    shouldScrollToLoadedUserMessageRef.current = false;
+    loadedUserMessageIndexRef.current = -1;
   };
 
   const handleRenameChat = (targetSessionId, currentTitle = 'Untitled Session') => {
@@ -491,6 +540,8 @@ export default function ChatInterface() {
         method: 'GET',
       });
       const loadedMessages = Array.isArray(payload?.messages) ? payload.messages : [];
+      loadedUserMessageIndexRef.current = findLastUserMessageIndex(loadedMessages);
+      shouldScrollToLoadedUserMessageRef.current = true;
       setMessages(loadedMessages);
       setSessionId(selectedSessionId);
       sessionIdRef.current = selectedSessionId;
@@ -501,6 +552,8 @@ export default function ChatInterface() {
       }
     } catch (error) {
       console.error('Error loading chat:', error);
+      shouldScrollToLoadedUserMessageRef.current = false;
+      loadedUserMessageIndexRef.current = -1;
       setMessages([{ id: 'system-error', text: 'Failed to load chat history.', sender: 'ai-error' }]);
     } finally {
       setChatLoading(false);
@@ -936,7 +989,7 @@ export default function ChatInterface() {
           </div>
         </header>
 
-        <section className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-7">
+        <section ref={chatScrollContainerRef} className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-7">
           <div className="mx-auto w-full max-w-5xl">
             {chatLoading ? (
               <div className="space-y-4">
@@ -983,7 +1036,12 @@ export default function ChatInterface() {
                   const avatarText = isUser ? 'You' : 'AI';
 
                   return (
-                    <div key={msg.id || index} className={`flex items-start gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
+                    <div
+                      key={msg.id || index}
+                      data-message-index={index}
+                      data-message-sender={msg.sender}
+                      className={`flex items-start gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}
+                    >
                       {!isUser && (
                         <div className={`mt-1 hidden h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold md:flex ${avatarClass}`}>
                           {avatarText}
