@@ -348,6 +348,7 @@ class Agent:
         document_length: str = "high",
         force_research_payload: str | None = None,
         ask_research_topic_only: bool = False,
+        allow_research_handoff: bool = True,
     ):
         self.__session_id = session_id
         self.__database = database
@@ -391,14 +392,16 @@ class Agent:
             database=database,
             browser=browser,
             research_depth=research_depth,
-        ).return_tools() + [handoff_to_research_graph]
+        ).return_tools()
+        if allow_research_handoff:
+            tool_list = [*tool_list, handoff_to_research_graph]
         chat_agent = create_agent(
             model=model,
             tools=tool_list,
             system_prompt=_normalize_system_prompt(system_prompt),
             middleware=[
                 ResearchCommandMiddleware(
-                    force_research_payload=force_research_payload,
+                    force_research_payload=force_research_payload if allow_research_handoff else None,
                     ask_research_topic_only=ask_research_topic_only,
                 ),
                 ChatHistoryMiddleware(database, session_id, model),

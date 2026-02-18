@@ -160,15 +160,10 @@ export default function MermaidBlock({ definition, diagramId }) {
   }, [validationError, didEmitValidationError, diagramId]);
 
   if (validationError) {
-    return (
-      <div ref={containerRef} className="ra-visual-block ra-visual-error">
-        <p className="ra-visual-error-title">Could not render diagram.</p>
-        <p className="ra-visual-error-message">{validationError}</p>
-        {normalizedDefinition && (
-          <pre className="ra-visual-fallback-pre">{normalizedDefinition}</pre>
-        )}
-      </div>
-    );
+    return null;
+  }
+  if (errorMessage) {
+    return null;
   }
 
   return (
@@ -176,17 +171,7 @@ export default function MermaidBlock({ definition, diagramId }) {
       <p className="ra-visual-title">Diagram</p>
 
       {!isVisible || isRendering ? (
-        <div className="ra-mermaid-skeleton">
-          <span>Diagram loads when visible.</span>
-        </div>
-      ) : errorMessage ? (
-        <div className="ra-visual-error">
-          <p className="ra-visual-error-title">Could not render diagram.</p>
-          <p className="ra-visual-error-message">{errorMessage}</p>
-          {normalizedDefinition && (
-            <pre className="ra-visual-fallback-pre">{normalizedDefinition}</pre>
-          )}
-        </div>
+        <div className="ra-mermaid-skeleton" />
       ) : (
         <div
           className="ra-mermaid-wrap"
