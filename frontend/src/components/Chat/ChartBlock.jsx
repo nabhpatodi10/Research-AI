@@ -223,13 +223,10 @@ export default function ChartBlock({ specSource, chartId }) {
   }, [parsed.error, chartId, didEmitValidationError]);
 
   if (parsed.error) {
-    return (
-      <div ref={containerRef} className="ra-visual-block ra-visual-error">
-        <p className="ra-visual-error-title">Could not render chart.</p>
-        <p className="ra-visual-error-message">{parsed.error}</p>
-        {parsed.raw && <pre className="ra-visual-fallback-pre">{parsed.raw}</pre>}
-      </div>
-    );
+    return null;
+  }
+  if (loadError) {
+    return null;
   }
 
   const payload = parsed.payload;
@@ -240,15 +237,7 @@ export default function ChartBlock({ specSource, chartId }) {
       {payload.title && <p className="ra-visual-title">{payload.title}</p>}
 
       {!isVisible || !EChartsComponent ? (
-        <div className="ra-chart-skeleton" style={{ height: `${chartHeight}px` }}>
-          <span>Chart loads when visible.</span>
-        </div>
-      ) : loadError ? (
-        <div className="ra-visual-error">
-          <p className="ra-visual-error-title">Could not render chart.</p>
-          <p className="ra-visual-error-message">{loadError}</p>
-          {parsed.raw && <pre className="ra-visual-fallback-pre">{parsed.raw}</pre>}
-        </div>
+        <div className="ra-chart-skeleton" style={{ height: `${chartHeight}px` }} />
       ) : (
         <div className="ra-chart-wrap" style={{ height: `${chartHeight}px` }}>
           <EChartsComponent
