@@ -45,7 +45,9 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     session_id: str
-    response: str
+    response: str | None = None
+    research_id: str | None = None
+    status: Literal["completed", "queued", "running"] | None = None
 
 
 class ChatSession(BaseModel):
@@ -91,3 +93,27 @@ class FeedbackRequest(BaseModel):
     feedbackType: str
     satisfaction: str
     comments: str
+
+
+class SessionTask(BaseModel):
+    id: str
+    type: Literal["research"]
+    status: Literal["queued", "running"]
+
+
+class SessionTaskStatusResponse(BaseModel):
+    session_id: str
+    active_task: SessionTask | None = None
+
+
+class ResearchStatusResponse(BaseModel):
+    research_id: str
+    session_id: str
+    status: Literal["queued", "running", "completed", "failed"]
+    error: str | None = None
+
+
+class ResearchResultResponse(BaseModel):
+    research_id: str
+    session_id: str
+    response: str
