@@ -39,7 +39,7 @@ class ChatRequest(BaseModel):
     force_research: bool = False
     model: Literal["mini", "pro"] = "pro"
     research_breadth: Literal["low", "medium", "high"] = "medium"
-    research_depth: Literal["low", "high"] = "high"
+    research_depth: Literal["low", "medium", "high"] = "high"
     document_length: Literal["low", "medium", "high"] = "high"
 
 
