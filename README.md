@@ -1,6 +1,6 @@
-# ResearchAI
+# Research-AI
 
-ResearchAI is a full-stack, backend-first research assistant:
+Research-AI is a full-stack, backend-first research assistant:
 
 - FastAPI backend with cookie-based auth, chat/session APIs, and a LangChain/LangGraph research runtime.
 - React + Vite frontend that acts as a thin UI client over backend APIs.
@@ -16,7 +16,7 @@ ResearchAI is a full-stack, backend-first research assistant:
 
 ## Benchmark Results
 
-ResearchAI was evaluated on the [DeepResearch Bench](https://github.com/Ayanami0730/deep_research_bench) benchmark with the following results:
+Research-AI was evaluated on the [DeepResearch Bench](https://github.com/Ayanami0730/deep_research_bench) benchmark with the following results:
 
 - Comprehensiveness: `0.5595`
 - Insight: `0.5930`
@@ -24,7 +24,7 @@ ResearchAI was evaluated on the [DeepResearch Bench](https://github.com/Ayanami0
 - Readability: `0.5253`
 - Overall Score: `0.5532`
 
-With these results, ResearchAI is at the **1st position on the leaderboard of DeepResearch Bench**.
+With these results, Research-AI is at the **1st position on the leaderboard of DeepResearch Bench**.
 
 ### Leaderboard Comparison Graphs
 
