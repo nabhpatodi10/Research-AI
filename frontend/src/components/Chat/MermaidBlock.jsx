@@ -107,12 +107,17 @@ export default function MermaidBlock({ definition, diagramId }) {
             theme: 'neutral',
             deterministicIds: true,
             deterministicIDSeed: 'research-ai-chat',
+            suppressErrorRendering: true,
           });
           isMermaidInitialized = true;
         }
 
         const renderId = `${diagramId}-${hashString(normalizedDefinition)}`;
-        const result = await mermaid.render(renderId, normalizedDefinition);
+        const result = await mermaid.render(
+          renderId,
+          normalizedDefinition,
+          containerRef.current || undefined
+        );
         if (!active) return;
 
         setSvgContent(String(result?.svg || ''));
