@@ -1,13 +1,9 @@
 import asyncio
-from typing import TYPE_CHECKING
 
 from bs4 import BeautifulSoup
 from playwright.async_api import Browser, Page, TimeoutError as PlaywrightTimeoutError
 from playwright_stealth import Stealth
 from langchain_core.documents import Document
-
-if TYPE_CHECKING:
-    from pdf_processing import PdfProcessingService
 
 SCRAPE_TIMEOUT_MS = 20_000
 
@@ -26,12 +22,11 @@ def _extract_text_and_title(html: str, url: str, provided_title: str | None, pag
 
 class Scrape:
     
-    def __init__(self, browser: Browser, pdf_processor: "PdfProcessingService | None" = None):
+    def __init__(self, browser: Browser):
         self.browser = browser
         self._stealth = Stealth()
         self._context = None
         self._context_lock = asyncio.Lock()
-        self._pdf_processor = pdf_processor
     
     async def _get_context(self):
         if self._context is not None:
@@ -117,9 +112,6 @@ class Scrape:
 
     async def scrape(self, url: str, title: str = None) -> Document | None:
         try:
-            if self._pdf_processor is not None and await self._pdf_processor.is_pdf_url(url):
-                return await self._pdf_processor.process_pdf_url(url, title)
-
             page = await self._new_page()
             try:
                 await self._goto_page(page, url)

@@ -8,7 +8,6 @@ from custom_search import CustomSearch
 from scrape import Scrape
 from database import Database
 from nodes import Nodes
-from pdf_processing import PdfProcessingService
 
 class Tools:
 
@@ -20,41 +19,13 @@ class Tools:
         research_depth: str = "high",
     ):
         self.__search = CustomSearch()
+        self.__scrape = Scrape(browser)
         self.__database = database
         self.__session_id = session_id
         self.__model = ChatGoogleGenerativeAI(model = "models/gemini-flash-lite-latest")
         self.__nodes = Nodes()
-        self.__pdf_processor = PdfProcessingService(
-            session_id=session_id,
-            database=database,
-        )
-        self.__scrape = Scrape(browser, pdf_processor=self.__pdf_processor)
-        self.__web_search_total_timeout_seconds = 40.0
-        self.__scrape_timeout_seconds = 30.0
-        if research_depth == "low":
-            self.__min_web_documents_before_stop = 1
-        elif research_depth == "medium":
-            self.__min_web_documents_before_stop = 2
-        else:
-            self.__min_web_documents_before_stop = 4
-
-    async def __queue_pdf_fallback_if_needed(
-        self,
-        url: str,
-        title: str | None,
-        reason: str,
-    ) -> None:
-        try:
-            if not await self.__pdf_processor.is_pdf_url(url):
-                return
-            await self.__pdf_processor.enqueue_background_job(
-                url=url,
-                title=title,
-                reason=reason,
-                partial_text_available=False,
-            )
-        except Exception as error:
-            print(f"[pdf] Failed to queue background fallback for {url}: {error}")
+        self.__web_search_total_timeout_seconds = 30.0
+        self.__min_web_documents_before_stop = 1 if research_depth == "low" else 3
 
     async def __scrape_with_timeout(
         self,
@@ -69,11 +40,6 @@ class Tools:
             )
         except asyncio.TimeoutError:
             print(f"Skipping {url}: scrape exceeded {timeout_seconds:.0f}s.")
-            await self.__queue_pdf_fallback_if_needed(
-                url=url,
-                title=title,
-                reason="scrape_timeout",
-            )
             return None
         except asyncio.CancelledError:
             raise
@@ -140,8 +106,8 @@ class Tools:
         if not __urls:
             return "No search results found."
 
-        per_url_timeout_seconds = self.__scrape_timeout_seconds
-        overall_scrape_timeout_seconds = self.__scrape_timeout_seconds
+        per_url_timeout_seconds = 20.0
+        overall_scrape_timeout_seconds = 20.0
         min_documents_before_stop = self.__min_web_documents_before_stop
         max_documents = 5
 
@@ -233,10 +199,7 @@ class Tools:
     async def url_search_tool(self, url: str) -> str:
         """URL Search tool to access documents from the web based on the given URL"""
         try:
-            document = await asyncio.wait_for(
-                self.__scrape.scrape(url),
-                timeout=self.__scrape_timeout_seconds,
-            )
+            document = await self.__scrape.scrape(url)
             if document is not None and document.page_content is not None and document.page_content.strip() != "":
                 await self.__database.add_data(self.__session_id, [document])
                 return (
@@ -246,13 +209,6 @@ class Tools:
                 )
             else:
                 return "No content found at the provided URL."
-        except asyncio.TimeoutError:
-            await self.__queue_pdf_fallback_if_needed(
-                url=url,
-                title=None,
-                reason="url_tool_timeout",
-            )
-            return "No content found at the provided URL."
         except Exception as e:
             return f"An error occured: {str(e)}"
     

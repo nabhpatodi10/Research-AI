@@ -4,7 +4,6 @@ import { useAuth } from '../../context/AuthContext';
 import { apiRequest } from '../../lib/api';
 import ChatHistory from './ChatHistory';
 import MarkdownRenderer from './MarkdownRenderer';
-import RichAssistantMessage from './RichAssistantMessage';
 
 const createClientMessageId = () => {
   const uuid = globalThis.crypto?.randomUUID?.();
@@ -71,7 +70,7 @@ const DEFAULT_CHAT_SETTINGS = {
 const VALID_CHAT_SETTING_VALUES = {
   model: new Set(['mini', 'pro']),
   research_breadth: new Set(['low', 'medium', 'high']),
-  research_depth: new Set(['low', 'medium', 'high']),
+  research_depth: new Set(['low', 'high']),
   document_length: new Set(['low', 'medium', 'high']),
 };
 
@@ -97,28 +96,6 @@ const sanitizeChatSettings = (candidate) => {
 };
 
 const isDesktopViewport = () => (typeof window !== 'undefined' ? window.innerWidth >= 768 : true);
-
-const findLastUserMessageIndex = (items) => {
-  if (!Array.isArray(items) || items.length === 0) return -1;
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    if (items[index]?.sender === 'user') {
-      return index;
-    }
-  }
-  return -1;
-};
-
-const RESEARCH_STATUS_POLL_INTERVAL_MS = 1000;
-
-const normalizeResearchStatus = (status) => {
-  const normalized = String(status || '').trim().toLowerCase();
-  if (normalized === 'queued' || normalized === 'running' || normalized === 'completed' || normalized === 'failed') {
-    return normalized;
-  }
-  return 'failed';
-};
-
-const getResearchPendingMessageId = (researchId) => `pending-research-${researchId}`;
 
 const SidebarContent = ({
   sessions,
@@ -200,6 +177,7 @@ function MessageBubble({ msg }) {
 
   const isUser = msg.sender === 'user';
   const isAssistant = msg.sender === 'ai';
+  const isError = msg.sender === 'ai-error' || msg.sender === 'system-error';
 
   if (isUser) {
     return (
@@ -211,18 +189,16 @@ function MessageBubble({ msg }) {
     );
   }
 
-  if (isAssistant) {
-    return (
-      <div className="max-w-full overflow-hidden rounded-2xl border border-blue-100 bg-white text-slate-800 shadow-sm md:max-w-[78%]">
-        <RichAssistantMessage content={msg.text} />
-      </div>
-    );
-  }
-
-  const markdownVariant = 'error';
+  const markdownVariant = isError ? 'error' : 'assistant';
 
   return (
-    <div className="max-w-full overflow-hidden rounded-2xl border border-red-200 bg-red-50 text-red-700 shadow-sm md:max-w-[78%]">
+    <div
+      className={`max-w-full overflow-hidden rounded-2xl shadow-sm md:max-w-[78%] ${
+        isAssistant
+          ? 'border border-blue-100 bg-white text-slate-800'
+          : 'border border-red-200 bg-red-50 text-red-700'
+      }`}
+    >
       <MarkdownRenderer content={msg.text} variant={markdownVariant} />
     </div>
   );
@@ -275,16 +251,11 @@ export default function ChatInterface() {
   const [showCommandMenu, setShowCommandMenu] = useState(false);
   const [commandSuggestions, setCommandSuggestions] = useState([]);
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
-  const [activeResearchTask, setActiveResearchTask] = useState(null);
 
   const sessionIdRef = useRef(sessionId);
   const isGeneratingRef = useRef(false);
-  const activeResearchTaskRef = useRef(activeResearchTask);
   const composerRef = useRef(null);
-  const chatScrollContainerRef = useRef(null);
   const commandTokenRangeRef = useRef({ start: 0, end: 0 });
-  const shouldScrollToLoadedUserMessageRef = useRef(false);
-  const loadedUserMessageIndexRef = useRef(-1);
 
   const applySessionTitleFromList = useCallback((allSessions, targetSessionId) => {
     if (!targetSessionId) return;
@@ -318,14 +289,6 @@ export default function ChatInterface() {
   }, [sessionId]);
 
   useEffect(() => {
-    activeResearchTaskRef.current = activeResearchTask;
-  }, [activeResearchTask]);
-
-  const hasActiveResearchTask = Boolean(activeResearchTask);
-  const isInteractionLocked = chatLoading || isGeneratingResponse || hasActiveResearchTask;
-  const showAgentActivity = isGeneratingResponse || hasActiveResearchTask;
-
-  useEffect(() => {
     if (!currentUser) return;
     loadSessions();
   }, [currentUser, loadSessions]);
@@ -352,38 +315,6 @@ export default function ChatInterface() {
       // Ignore localStorage persistence errors.
     }
   }, [chatSettings]);
-
-  useEffect(() => {
-    if (!shouldScrollToLoadedUserMessageRef.current || chatLoading) return;
-    const container = chatScrollContainerRef.current;
-    if (!container) return;
-
-    let targetNode = null;
-    const targetIndex = loadedUserMessageIndexRef.current;
-
-    if (Number.isInteger(targetIndex) && targetIndex >= 0) {
-      targetNode = container.querySelector(`[data-message-index="${targetIndex}"]`);
-    }
-
-    if (!targetNode) {
-      const userNodes = container.querySelectorAll('[data-message-sender="user"]');
-      if (userNodes.length > 0) {
-        targetNode = userNodes[userNodes.length - 1];
-      }
-    }
-
-    if (targetNode) {
-      const containerRect = container.getBoundingClientRect();
-      const targetRect = targetNode.getBoundingClientRect();
-      const nextScrollTop = targetRect.top - containerRect.top + container.scrollTop - 12;
-      container.scrollTop = Math.max(0, nextScrollTop);
-    } else {
-      container.scrollTop = container.scrollHeight;
-    }
-
-    shouldScrollToLoadedUserMessageRef.current = false;
-    loadedUserMessageIndexRef.current = -1;
-  }, [messages, chatLoading]);
 
   const updateChatSetting = (key, value) => {
     setChatSettings((prev) =>
@@ -450,194 +381,6 @@ export default function ChatInterface() {
     [closeCommandMenu, input]
   );
 
-  const ensurePendingResearchMessage = useCallback((pendingMessageId) => {
-    setMessages((prev) => {
-      const alreadyPresent = prev.some((message) => message.id === pendingMessageId);
-      if (alreadyPresent) return prev;
-      return [
-        ...prev,
-        {
-          id: pendingMessageId,
-          text: 'Research is in progress. Final document will appear here once complete.',
-          sender: 'ai',
-          status: 'pending',
-        },
-      ];
-    });
-  }, []);
-
-  const syncSessionTaskStatus = useCallback(
-    async (targetSessionId) => {
-      if (!targetSessionId) return null;
-      try {
-        const payload = await apiRequest(`/chat/sessions/${targetSessionId}/task-status`, { method: 'GET' });
-        const activeTask = payload?.active_task;
-        const taskId = String(activeTask?.id || '').trim();
-        const taskType = String(activeTask?.type || '').trim();
-        const taskStatus = normalizeResearchStatus(activeTask?.status);
-
-        if (taskId && taskType === 'research' && (taskStatus === 'queued' || taskStatus === 'running')) {
-          const fallbackPendingMessageId = getResearchPendingMessageId(taskId);
-          const previousTask = activeResearchTaskRef.current;
-          const resolvedPendingMessageId =
-            previousTask && previousTask.researchId === taskId
-              ? String(previousTask.pendingMessageId || fallbackPendingMessageId)
-              : fallbackPendingMessageId;
-          setActiveResearchTask({
-            researchId: taskId,
-            sessionId: targetSessionId,
-            status: taskStatus,
-            pendingMessageId: resolvedPendingMessageId,
-          });
-          if (sessionIdRef.current === targetSessionId) {
-            ensurePendingResearchMessage(resolvedPendingMessageId);
-          }
-          return { researchId: taskId, status: taskStatus };
-        }
-
-        setActiveResearchTask((prev) => {
-          if (!prev) return null;
-          if (prev.sessionId !== targetSessionId) return prev;
-          return null;
-        });
-        return null;
-      } catch (error) {
-        console.error('Error checking task status:', error);
-        return null;
-      }
-    },
-    [ensurePendingResearchMessage]
-  );
-
-  useEffect(() => {
-    if (!sessionId) return undefined;
-    if (activeResearchTaskRef.current?.sessionId === sessionId) return undefined;
-
-    let cancelled = false;
-    const runSingleTaskStatusSync = async () => {
-      if (cancelled) return;
-      await syncSessionTaskStatus(sessionId);
-    };
-
-    runSingleTaskStatusSync();
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId, syncSessionTaskStatus]);
-
-  useEffect(() => {
-    if (!activeResearchTask?.researchId) return undefined;
-
-    let cancelled = false;
-    const pollResearchStatus = async () => {
-      if (cancelled) return;
-      const taskSnapshot = activeResearchTaskRef.current;
-      if (!taskSnapshot?.researchId) return;
-
-      const { researchId, sessionId: taskSessionId, pendingMessageId } = taskSnapshot;
-
-      try {
-        const statusPayload = await apiRequest(`/chat/research/${researchId}/status`, { method: 'GET' });
-        if (cancelled) return;
-        const status = normalizeResearchStatus(statusPayload?.status);
-
-        if (status === 'queued' || status === 'running') {
-          setActiveResearchTask((prev) => {
-            if (!prev || prev.researchId !== researchId) return prev;
-            if (prev.status === status) return prev;
-            return { ...prev, status };
-          });
-          return;
-        }
-
-        if (status === 'failed') {
-          const failureText = String(statusPayload?.error || 'Research failed. Please try again.');
-          if (sessionIdRef.current === taskSessionId) {
-            setMessages((prev) =>
-              prev.map((message) =>
-                message.id === pendingMessageId
-                  ? { ...message, text: failureText, sender: 'ai-error', status: 'error' }
-                  : message
-              )
-            );
-          }
-          setActiveResearchTask(null);
-          setIsGeneratingResponse(false);
-          isGeneratingRef.current = false;
-          await loadSessions({ silent: true });
-          return;
-        }
-
-        const resultPayload = await apiRequest(`/chat/research/${researchId}/result`, { method: 'GET' });
-        if (cancelled) return;
-
-        const responseText = String(resultPayload?.response || '').trim();
-        if (!responseText) {
-          throw new Error('Research completed but no response text was returned.');
-        }
-
-        if (sessionIdRef.current === taskSessionId) {
-          setMessages((prev) => {
-            const pendingIndex = prev.findIndex((message) => message.id === pendingMessageId);
-            if (pendingIndex >= 0) {
-              return prev.map((message, index) =>
-                index === pendingIndex
-                  ? { ...message, text: responseText, sender: 'ai', status: 'done' }
-                  : message
-              );
-            }
-
-            const lastMessage = prev[prev.length - 1];
-            const lastText = String(lastMessage?.text || '').trim();
-            if (lastMessage?.sender === 'ai' && lastText === responseText) {
-              return prev;
-            }
-
-            return [...prev, { id: `ai-${createClientMessageId()}`, text: responseText, sender: 'ai' }];
-          });
-        }
-
-        setActiveResearchTask(null);
-        setIsGeneratingResponse(false);
-        isGeneratingRef.current = false;
-        await loadSessions({ silent: true });
-      } catch (error) {
-        if (cancelled) return;
-        const errorMessage = String(error?.message || '');
-        if (!errorMessage.toLowerCase().includes('not found')) {
-          console.error('Error polling research status:', error);
-          return;
-        }
-
-        if (sessionIdRef.current === taskSessionId) {
-          setMessages((prev) =>
-            prev.map((message) =>
-              message.id === pendingMessageId
-                ? {
-                    ...message,
-                    text: 'Research task could not be found. Please retry.',
-                    sender: 'ai-error',
-                    status: 'error',
-                  }
-                : message
-            )
-          );
-        }
-
-        setActiveResearchTask(null);
-        setIsGeneratingResponse(false);
-        isGeneratingRef.current = false;
-      }
-    };
-
-    pollResearchStatus();
-    const intervalId = window.setInterval(pollResearchStatus, RESEARCH_STATUS_POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [activeResearchTask, loadSessions]);
-
   const handleNewChat = () => {
     setMessages([]);
     setInput('');
@@ -651,8 +394,6 @@ export default function ChatInterface() {
     setShareError('');
     setComposerError('');
     closeCommandMenu();
-    shouldScrollToLoadedUserMessageRef.current = false;
-    loadedUserMessageIndexRef.current = -1;
   };
 
   const handleRenameChat = (targetSessionId, currentTitle = 'Untitled Session') => {
@@ -750,8 +491,6 @@ export default function ChatInterface() {
         method: 'GET',
       });
       const loadedMessages = Array.isArray(payload?.messages) ? payload.messages : [];
-      loadedUserMessageIndexRef.current = findLastUserMessageIndex(loadedMessages);
-      shouldScrollToLoadedUserMessageRef.current = true;
       setMessages(loadedMessages);
       setSessionId(selectedSessionId);
       sessionIdRef.current = selectedSessionId;
@@ -762,8 +501,6 @@ export default function ChatInterface() {
       }
     } catch (error) {
       console.error('Error loading chat:', error);
-      shouldScrollToLoadedUserMessageRef.current = false;
-      loadedUserMessageIndexRef.current = -1;
       setMessages([{ id: 'system-error', text: 'Failed to load chat history.', sender: 'ai-error' }]);
     } finally {
       setChatLoading(false);
@@ -772,7 +509,7 @@ export default function ChatInterface() {
 
   const handleSend = async (event) => {
     event.preventDefault();
-    if (isGeneratingRef.current || chatLoading || hasActiveResearchTask) return;
+    if (isGeneratingRef.current) return;
 
     const rawInput = input;
     const trimmedInput = rawInput.trim();
@@ -787,7 +524,6 @@ export default function ChatInterface() {
     const messageText = shouldForceResearch ? commandState.topic : trimmedInput;
     if (!messageText) return;
 
-    let queuedResearch = false;
     isGeneratingRef.current = true;
     setIsGeneratingResponse(true);
     setComposerError('');
@@ -820,41 +556,14 @@ export default function ChatInterface() {
       });
 
       const returnedSessionId = String(payload?.session_id || '').trim();
-      const researchId = String(payload?.research_id || '').trim();
       const responseText = String(payload?.response || '').trim();
+      if (!responseText) {
+        throw new Error('Empty response from backend');
+      }
 
       if (returnedSessionId) {
         setSessionId(returnedSessionId);
         sessionIdRef.current = returnedSessionId;
-      }
-
-      if (researchId) {
-        queuedResearch = true;
-        const targetSessionId = returnedSessionId || sessionIdRef.current;
-        setActiveResearchTask({
-          researchId,
-          sessionId: targetSessionId,
-          status: 'queued',
-          pendingMessageId,
-        });
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === pendingMessageId
-              ? {
-                  ...message,
-                  text: 'Research started. This may take a few minutes.',
-                  sender: 'ai',
-                  status: 'pending',
-                }
-              : message
-          )
-        );
-        await loadSessions({ silent: true });
-        return;
-      }
-
-      if (!responseText) {
-        throw new Error('Empty response from backend');
       }
 
       setMessages((prev) =>
@@ -867,32 +576,21 @@ export default function ChatInterface() {
       await loadSessions({ silent: true });
     } catch (error) {
       console.error('Error sending message:', error);
-      const errorText = String(error?.message || "Sorry, I couldn't process your request.");
       setMessages((prev) =>
         prev.map((message) =>
           message.id === pendingMessageId
             ? {
                 ...message,
-                text: errorText,
+                text: "Sorry, I couldn't process your request.",
                 sender: 'ai-error',
                 status: 'error',
               }
             : message
         )
       );
-
-      const normalizedError = errorText.toLowerCase();
-      if (
-        sessionIdRef.current &&
-        (normalizedError.includes('already running') || normalizedError.includes('already in progress'))
-      ) {
-        await syncSessionTaskStatus(sessionIdRef.current);
-      }
     } finally {
-      if (!queuedResearch) {
-        isGeneratingRef.current = false;
-        setIsGeneratingResponse(false);
-      }
+      isGeneratingRef.current = false;
+      setIsGeneratingResponse(false);
     }
   };
 
@@ -933,7 +631,7 @@ export default function ChatInterface() {
     if (event.shiftKey) return;
 
     event.preventDefault();
-    if (isInteractionLocked || !input.trim()) return;
+    if (chatLoading || isGeneratingResponse || !input.trim()) return;
     if (parseResearchCommand(input).isEmptyResearchCommand) {
       setComposerError('Add a topic after /research before sending.');
       return;
@@ -970,11 +668,6 @@ export default function ChatInterface() {
   };
 
   const isEmptyResearchCommand = parseResearchCommand(input).isEmptyResearchCommand;
-  const composerHint = hasActiveResearchTask
-    ? 'A research task is in progress. Sending is disabled until it completes.'
-    : isGeneratingResponse
-      ? 'Wait for the current response to finish before sending another message.'
-      : 'Enter to send. Shift+Enter for a new line.';
 
   return (
     <div className="relative flex h-screen overflow-hidden bg-gradient-to-b from-slate-50 via-blue-50/40 to-slate-100">
@@ -1224,10 +917,10 @@ export default function ChatInterface() {
             </div>
 
             <div className="flex items-center gap-2">
-              {showAgentActivity && (
+              {isGeneratingResponse && (
                 <span className="hidden items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 md:inline-flex">
                   <span className="h-1.5 w-1.5 rounded-full bg-blue-700 animate-pulse" />
-                  {hasActiveResearchTask ? 'Research running' : 'Generating'}
+                  Generating
                 </span>
               )}
 
@@ -1243,7 +936,7 @@ export default function ChatInterface() {
           </div>
         </header>
 
-        <section ref={chatScrollContainerRef} className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-7">
+        <section className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-7">
           <div className="mx-auto w-full max-w-5xl">
             {chatLoading ? (
               <div className="space-y-4">
@@ -1275,7 +968,7 @@ export default function ChatInterface() {
                       type="button"
                       onClick={() => setInput(prompt)}
                       className="rounded-xl border border-blue-100 bg-blue-50/50 px-4 py-3 text-left text-sm text-slate-700 transition hover:border-blue-200 hover:bg-blue-50"
-                      disabled={isInteractionLocked}
+                      disabled={isGeneratingResponse}
                     >
                       {prompt}
                     </button>
@@ -1290,12 +983,7 @@ export default function ChatInterface() {
                   const avatarText = isUser ? 'You' : 'AI';
 
                   return (
-                    <div
-                      key={msg.id || index}
-                      data-message-index={index}
-                      data-message-sender={msg.sender}
-                      className={`flex items-start gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}
-                    >
+                    <div key={msg.id || index} className={`flex items-start gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
                       {!isUser && (
                         <div className={`mt-1 hidden h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold md:flex ${avatarClass}`}>
                           {avatarText}
@@ -1367,7 +1055,7 @@ export default function ChatInterface() {
                       <select
                         value={chatSettings.model}
                         onChange={(event) => updateChatSetting('model', event.target.value)}
-                        disabled={isInteractionLocked}
+                        disabled={chatLoading || isGeneratingResponse}
                         className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
                       >
                         <option value="mini">Mini</option>
@@ -1379,7 +1067,7 @@ export default function ChatInterface() {
                       <select
                         value={chatSettings.research_breadth}
                         onChange={(event) => updateChatSetting('research_breadth', event.target.value)}
-                        disabled={isInteractionLocked}
+                        disabled={chatLoading || isGeneratingResponse}
                         className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
                       >
                         <option value="low">Low</option>
@@ -1392,11 +1080,10 @@ export default function ChatInterface() {
                       <select
                         value={chatSettings.research_depth}
                         onChange={(event) => updateChatSetting('research_depth', event.target.value)}
-                        disabled={isInteractionLocked}
+                        disabled={chatLoading || isGeneratingResponse}
                         className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
                       >
                         <option value="low">Low</option>
-                        <option value="medium">Medium</option>
                         <option value="high">High</option>
                       </select>
                     </label>
@@ -1405,7 +1092,7 @@ export default function ChatInterface() {
                       <select
                         value={chatSettings.document_length}
                         onChange={(event) => updateChatSetting('document_length', event.target.value)}
-                        disabled={isInteractionLocked}
+                        disabled={chatLoading || isGeneratingResponse}
                         className="rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
                       >
                         <option value="low">Low</option>
@@ -1441,7 +1128,7 @@ export default function ChatInterface() {
                   onKeyDown={handleComposerKeyDown}
                   placeholder={sessionId ? 'Ask a follow-up question...' : 'Describe what you want to research...'}
                   className="max-h-[180px] w-full resize-none rounded-xl border border-transparent bg-transparent px-3 py-2.5 text-sm leading-6 text-slate-800 outline-none focus:border-blue-100 whitespace-pre-wrap break-words"
-                  disabled={isInteractionLocked}
+                  disabled={chatLoading || isGeneratingResponse}
                 />
                 {showCommandMenu && commandSuggestions.length > 0 && (
                   <div
@@ -1468,7 +1155,7 @@ export default function ChatInterface() {
                 <button
                   type="submit"
                   className="inline-flex items-center gap-2 rounded-xl bg-blue-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={isInteractionLocked || !input.trim() || isEmptyResearchCommand}
+                  disabled={chatLoading || isGeneratingResponse || !input.trim() || isEmptyResearchCommand}
                 >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10.5 22 3l-7.5 19-2.8-8.7L3 10.5Z" />
@@ -1478,7 +1165,7 @@ export default function ChatInterface() {
               </div>
 
               <div className="flex items-center justify-between px-2 pb-1 pt-2 text-[11px] text-slate-500">
-                <span>{composerHint}</span>
+                <span>{isGeneratingResponse ? 'Wait for the current response to finish before sending another message.' : 'Enter to send. Shift+Enter for a new line.'}</span>
                 <span>{sessionId ? 'Session active' : 'New session'}</span>
               </div>
               {composerError && (
