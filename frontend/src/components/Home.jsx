@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { useAuth } from '../context/useAuth';
+import { useAuth } from '../context/AuthContext';
 import OverallComparisonChart from './BenchmarkCharts/OverallComparisonChart';
 import ParameterComparisonChart from './BenchmarkCharts/ParameterComparisonChart';
 

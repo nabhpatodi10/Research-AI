@@ -1,10 +1,9 @@
+import os
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote_plus, urlencode
 
 import httpx
-
-from settings import get_settings
 
 
 class FirebaseAuthError(Exception):
@@ -24,19 +23,22 @@ class AuthUser:
 
 class FirebaseAuthService:
     def __init__(self):
-        settings = get_settings()
-        self._firebase_api_key = settings.firebase_web_api_key
+        self._firebase_api_key = (
+            os.getenv("FIREBASE_WEB_API_KEY")
+            or os.getenv("GEMINI_API_KEY")
+            or os.getenv("GOOGLE_API_KEY")
+        )
+        self._google_client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
+        self._google_client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+        self._google_redirect_uri = os.getenv("GOOGLE_OAUTH_REDIRECT_URI")
+        self._frontend_base_url = (os.getenv("FRONTEND_BASE_URL") or "http://localhost:3000").rstrip(
+            "/"
+        )
 
         if not self._firebase_api_key:
             raise RuntimeError(
-                "Missing Firebase Web API key. Set FIREBASE_WEB_API_KEY."
+                "Missing Firebase Web API key. Set FIREBASE_WEB_API_KEY (or GEMINI_API_KEY/GOOGLE_API_KEY fallback)."
             )
-
-        self._google_client_id = settings.google_oauth_client_id
-        self._google_client_secret = settings.google_oauth_client_secret
-        self._google_redirect_uri = settings.google_oauth_redirect_uri
-        self._frontend_base_url = settings.frontend_base_url
-        self._request_timeout_seconds = settings.firebase_auth_timeout_seconds
 
     @staticmethod
     def _friendly_error(message: str) -> str:
@@ -53,7 +55,7 @@ class FirebaseAuthService:
 
     async def _identity_post(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
         url = f"https://identitytoolkit.googleapis.com/v1/{method}?key={self._firebase_api_key}"
-        async with httpx.AsyncClient(timeout=httpx.Timeout(self._request_timeout_seconds)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
             response = await client.post(url, json=payload)
 
         if response.is_success:
@@ -137,7 +139,7 @@ class FirebaseAuthService:
             "redirect_uri": self._google_redirect_uri,
             "grant_type": "authorization_code",
         }
-        async with httpx.AsyncClient(timeout=httpx.Timeout(self._request_timeout_seconds)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
             token_response = await client.post("https://oauth2.googleapis.com/token", data=token_payload)
 
         if not token_response.is_success:

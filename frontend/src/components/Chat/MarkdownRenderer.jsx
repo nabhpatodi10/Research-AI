@@ -51,13 +51,6 @@ const preserveUserLineBreaks = (value) =>
     .replace(/\r/g, '\n')
     .replace(/\n/g, '  \n');
 
-const classHasToken = (className, token) => {
-  if (!className || !token) return false;
-  return String(className)
-    .split(/\s+/)
-    .some((item) => item === token);
-};
-
 const MarkdownRenderer = ({ content, variant = 'assistant' }) => {
   const normalizedContent = normalizeMathDelimiters(content);
   const renderedContent =
@@ -74,21 +67,11 @@ const MarkdownRenderer = ({ content, variant = 'assistant' }) => {
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[
-          [rehypeKatex, { output: 'html', throwOnError: false, strict: 'ignore' }],
+          [rehypeKatex, { output: 'html' }],
           rehypeHighlight,
           [rehypeSanitize, sanitizeSchema],
         ]}
         components={{
-          span({ className, children, ...props }) {
-            if (classHasToken(className, 'katex-error')) {
-              return null;
-            }
-            return (
-              <span className={className} {...props}>
-                {children}
-              </span>
-            );
-          },
           code({ className, children, ...props }) {
             return (
               <code className={className} {...props}>
