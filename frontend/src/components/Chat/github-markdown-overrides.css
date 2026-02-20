@@ -350,6 +350,15 @@
   text-align: left;
 }
 
+.markdown-body .katex-error {
+  display: none !important;
+}
+
+.markdown-body span.math-inline:empty,
+.markdown-body span.math-display:empty {
+  display: none !important;
+}
+
 .markdown-body.markdown-body--user .katex,
 .markdown-body.markdown-body--user .katex .base {
   color: #eff6ff;
@@ -358,4 +367,119 @@
 .markdown-body.markdown-body--error .katex,
 .markdown-body.markdown-body--error .katex .base {
   color: #b91c1c;
+}
+
+.ra-rich-assistant {
+  display: flex;
+  flex-direction: column;
+}
+
+.ra-rich-assistant > .markdown-body {
+  padding-top: 0.85rem;
+  padding-bottom: 0.65rem;
+}
+
+.ra-visual-block {
+  margin: 0.35rem 1rem 0.9rem;
+  border: 1px solid #dbeafe;
+  border-radius: 0.9rem;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  overflow: hidden;
+}
+
+.ra-visual-title {
+  margin: 0;
+  padding: 0.7rem 0.85rem 0.5rem;
+  font-size: 0.77rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #1e3a8a;
+}
+
+.ra-visual-caption {
+  margin: 0;
+  padding: 0.55rem 0.85rem 0.8rem;
+  font-size: 0.78rem;
+  color: #475569;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.ra-chart-wrap {
+  width: 100%;
+  min-height: 220px;
+}
+
+.ra-mermaid-wrap {
+  padding: 0.6rem 0.75rem 0.75rem;
+  overflow-x: auto;
+}
+
+.ra-mermaid-wrap svg {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+}
+
+.ra-chart-skeleton,
+.ra-mermaid-skeleton {
+  display: grid;
+  place-items: center;
+  min-height: 220px;
+  background:
+    linear-gradient(90deg, #eef2ff 0%, #f8fbff 40%, #eef2ff 80%),
+    #f8fafc;
+  color: #64748b;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+}
+
+.ra-mermaid-skeleton {
+  min-height: 240px;
+}
+
+.ra-visual-error {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.ra-visual-error-title {
+  margin: 0;
+  padding: 0.75rem 0.85rem 0.25rem;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #b91c1c;
+}
+
+.ra-visual-error-message {
+  margin: 0;
+  padding: 0 0.85rem 0.75rem;
+  font-size: 0.78rem;
+  color: #b91c1c;
+}
+
+.ra-visual-fallback-pre {
+  margin: 0;
+  padding: 0.85rem;
+  max-height: 240px;
+  overflow: auto;
+  border-top: 1px solid #fecaca;
+  background: #7f1d1d;
+  color: #fee2e2;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 767px) {
+  .ra-visual-block {
+    margin-left: 0.75rem;
+    margin-right: 0.75rem;
+  }
+
+  .ra-rich-assistant > .markdown-body {
+    padding-left: 0.85rem;
+    padding-right: 0.85rem;
+  }
 }
