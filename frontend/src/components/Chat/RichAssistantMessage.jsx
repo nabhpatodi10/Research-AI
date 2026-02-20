@@ -1,9 +1,10 @@
-import { useEffect, useMemo } from 'react';
+import { Suspense, lazy, useEffect, useMemo } from 'react';
 
-import ChartBlock from './ChartBlock';
-import MarkdownRenderer from './MarkdownRenderer';
-import MermaidBlock from './MermaidBlock';
 import { parseAssistantRichBlocks } from './parseAssistantRichBlocks';
+
+const ChartBlock = lazy(() => import('./ChartBlock'));
+const MarkdownRenderer = lazy(() => import('./MarkdownRenderer'));
+const MermaidBlock = lazy(() => import('./MermaidBlock'));
 
 function logBlockBreakdown(blocks) {
   if (!import.meta.env.DEV) return;
@@ -31,25 +32,34 @@ export default function RichAssistantMessage({ content }) {
 
         if (block.type === 'chartjson') {
           return (
-            <ChartBlock
-              key={key}
-              specSource={block.content}
-              chartId={`assistant-chart-${index}`}
-            />
+            <Suspense key={key} fallback={null}>
+              <ChartBlock
+                specSource={block.content}
+                chartId={`assistant-chart-${index}`}
+              />
+            </Suspense>
           );
         }
 
         if (block.type === 'mermaid') {
           return (
-            <MermaidBlock
-              key={key}
-              definition={block.content}
-              diagramId={`assistant-mermaid-${index}`}
-            />
+            <Suspense key={key} fallback={null}>
+              <MermaidBlock
+                definition={block.content}
+                diagramId={`assistant-mermaid-${index}`}
+              />
+            </Suspense>
           );
         }
 
-        return <MarkdownRenderer key={key} content={block.content} variant="assistant" />;
+        return (
+          <Suspense
+            key={key}
+            fallback={<div className="px-4 py-3 text-sm text-slate-500 whitespace-pre-wrap">{block.content}</div>}
+          >
+            <MarkdownRenderer content={block.content} variant="assistant" />
+          </Suspense>
+        );
       })}
     </div>
   );
