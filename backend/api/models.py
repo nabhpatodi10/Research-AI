@@ -43,19 +43,14 @@ class ChatRequest(BaseModel):
     document_length: Literal["low", "medium", "high"] = "high"
 
 
-class ChatResponse(BaseModel):
-    session_id: str
-    response: str | None = None
-    research_id: str | None = None
-    status: Literal["completed", "queued", "running"] | None = None
-
-
 class ChatSession(BaseModel):
     id: str
     topic: str
     createdAt: str
     isShared: bool
     sharedBy: str | None = None
+    shareMode: Literal["collaborative", "snapshot"] | None = None
+    sourceSessionId: str | None = None
 
 
 class ChatSessionsResponse(BaseModel):
@@ -68,8 +63,32 @@ class ChatMessage(BaseModel):
     text: str
 
 
+class SessionTask(BaseModel):
+    id: str
+    type: Literal["research"]
+    status: Literal["queued", "running", "completed", "failed"]
+    current_node: str | None = None
+    progress_message: str | None = None
+
+
 class ChatMessagesResponse(BaseModel):
     messages: list[ChatMessage]
+    active_task: SessionTask | None = None
+
+
+class ChatResponseMessage(BaseModel):
+    kind: Literal["message"] = "message"
+    session_id: str
+    message: ChatMessage
+
+
+class ChatResponseTask(BaseModel):
+    kind: Literal["task"] = "task"
+    session_id: str
+    task: SessionTask
+
+
+ChatResponse = ChatResponseMessage | ChatResponseTask
 
 
 class RenameSessionRequest(BaseModel):
@@ -78,6 +97,13 @@ class RenameSessionRequest(BaseModel):
 
 class ShareSessionRequest(BaseModel):
     email: str
+    collaborative: bool = True
+
+
+class ShareSessionResponse(BaseModel):
+    ok: bool
+    mode: Literal["collaborative", "snapshot"]
+    shared_session_id: str
 
 
 class SessionMutationResponse(BaseModel):
@@ -95,25 +121,12 @@ class FeedbackRequest(BaseModel):
     comments: str
 
 
-class SessionTask(BaseModel):
+class TaskStatusResponse(BaseModel):
     id: str
     type: Literal["research"]
-    status: Literal["queued", "running"]
-
-
-class SessionTaskStatusResponse(BaseModel):
-    session_id: str
-    active_task: SessionTask | None = None
-
-
-class ResearchStatusResponse(BaseModel):
-    research_id: str
-    session_id: str
     status: Literal["queued", "running", "completed", "failed"]
-    error: str | None = None
-
-
-class ResearchResultResponse(BaseModel):
-    research_id: str
     session_id: str
-    response: str
+    current_node: str | None = None
+    progress_message: str | None = None
+    result: str | None = None
+    error: str | None = None
