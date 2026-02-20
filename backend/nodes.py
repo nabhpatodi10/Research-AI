@@ -72,9 +72,9 @@ Response expectations:
 - Use equations and LaTex formatting when you are presenting mathematical or any kind of equations in the content.
 
 Equations and LaTex:
-- Equations must use exactly one delimiter style: $...$, $$...$$, \(...\), or \[...\].
-- Never nest math delimiters (e.g., no $$...$$ inside $...$ or inside \[...\]).
-- If using \left, always close with \\right; if using \Big, it must size a delimiter like [ ( | or .
+- Equations must use exactly one delimiter style: $...$, $$...$$, \\(...\\), or \\[...\\].
+- Never nest math delimiters (e.g., no $$...$$ inside $...$ or inside \\[...\\]).
+- If using \\left, always close with \\right; if using \\Big, it must size a delimiter like [ ( | or .
 - Before final output, ensure math brackets/parentheses are balanced and delimiters are not nested.
 
 Escalation and safety:
@@ -113,9 +113,9 @@ Response expectations:
 - Do not add citations in between the content, add citations in the citations part of the output.
 
 Equations and LaTex:
-- Equations must use exactly one delimiter style: $...$, $$...$$, \(...\), or \[...\].
-- Never nest math delimiters (e.g., no $$...$$ inside $...$ or inside \[...\]).
-- If using \left, always close with \\right; if using \Big, it must size a delimiter like [ ( | or .
+- Equations must use exactly one delimiter style: $...$, $$...$$, \\(...\\), or \\[...\\].
+- Never nest math delimiters (e.g., no $$...$$ inside $...$ or inside \\[...\\]).
+- If using \\left, always close with \\right; if using \\Big, it must size a delimiter like [ ( | or .
 - Before final output, ensure math brackets/parentheses are balanced and delimiters are not nested.
 
 Escalation and safety:
@@ -218,3 +218,67 @@ Escalation and safety:
         ]
 
         return messages
+
+    def generate_research_handoff_brief(self, transcript_lines: list[str]) -> list[AnyMessage]:
+        return [
+            SystemMessage(
+                content=(
+                    "You are preparing a handoff brief for a dedicated deep-research workflow. "
+                    "Create a compact but complete brief from the transcript. Include: "
+                    "1) main research objective, 2) explicit requirements/constraints, "
+                    "3) requested output format/length/style, 4) unresolved questions/assumptions, "
+                    "5) key context that must not be lost. Do not invent facts."
+                )
+            ),
+            HumanMessage(content="Conversation transcript:\n\n" + "\n\n".join(transcript_lines)),
+        ]
+
+    def research_topic_followup_instruction(self) -> SystemMessage:
+        return SystemMessage(
+            content=(
+                "The user requested deep research but has not provided a concrete research topic. "
+                "Reply with exactly one short follow-up question asking for the topic/idea and any "
+                "specific requirements for the final document. Do not call tools."
+            )
+        )
+
+    def force_research_handoff_instruction(self) -> SystemMessage:
+        return SystemMessage(
+            content=(
+                "You must call the tool `handoff_to_research_graph` in this turn. "
+                "Use the complete research idea provided by the latest user context. "
+                "Do not ask follow-up questions and do not return a normal text answer."
+            )
+        )
+
+    def auto_research_handoff_decision_prompt(self, user_input: str) -> list[AnyMessage]:
+        return [
+            SystemMessage(
+                content=(
+                    "Decide whether this user input should be handed off to the deep-research workflow. "
+                    "Return a structured decision with `should_handoff` (boolean) and `confidence` "
+                    "(0.0-1.0). Choose handoff only when the request clearly asks for deep research, "
+                    "comprehensive analysis, benchmarking/report writing, or synthesis with sources."
+                )
+            ),
+            HumanMessage(content=f"User input:\n{user_input}"),
+        ]
+
+    def pdf_url_extraction_prompt(self, url: str) -> str:
+        return (
+            "Use URL Context to read and extract the full textual content from this PDF URL.\n"
+            f"URL: {url}\n\n"
+            "Requirements:\n"
+            "1) Extract as much text as possible from the full document, preserving section flow.\n"
+            "2) Keep headings, lists, equations, and table text in readable plain text/markdown.\n"
+            "3) Do not summarize or omit important content.\n"
+            "4) Do not add analysis or commentary; return extracted document text only."
+        )
+
+    def outline_research_idea_message(self, research_idea: str) -> HumanMessage:
+        return HumanMessage(
+            content=(
+                "Generate a detailed, structured document outline for this research idea:\n"
+                f"{research_idea}"
+            )
+        )
