@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+
+const LONG_PRESS_DELAY_MS = 420;
 
 export default function ChatHistory({
   sessions = [],
@@ -10,8 +12,40 @@ export default function ChatHistory({
   onRenameChat,
   onShareChat,
   searchTerm = '',
+  taskBySession = {},
 }) {
   const [openMenuId, setOpenMenuId] = useState(null);
+  const longPressTimerRef = useRef(null);
+  const longPressTriggeredRef = useRef(false);
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current === null) return;
+    window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
+  };
+
+  const startLongPress = (sessionId, pointerType = '') => {
+    if (pointerType !== 'touch' && pointerType !== 'pen') return;
+
+    clearLongPressTimer();
+    longPressTriggeredRef.current = false;
+
+    longPressTimerRef.current = window.setTimeout(() => {
+      setOpenMenuId(sessionId);
+      longPressTriggeredRef.current = true;
+
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        navigator.vibrate(10);
+      }
+    }, LONG_PRESS_DELAY_MS);
+  };
+
+  useEffect(
+    () => () => {
+      clearLongPressTimer();
+    },
+    []
+  );
 
   useEffect(() => {
     if (!openMenuId) return undefined;
@@ -20,6 +54,7 @@ export default function ChatHistory({
       const menuRoot = event.target.closest('[data-chat-menu-root="true"]');
       if (!menuRoot) {
         setOpenMenuId(null);
+        longPressTriggeredRef.current = false;
       }
     };
 
@@ -68,6 +103,25 @@ export default function ChatHistory({
             })
           : '';
         const isActive = activeSessionId === session.id;
+        const task = taskBySession?.[session.id];
+        const taskStatus = String(task?.status || '').trim().toLowerCase();
+        const isTaskRunning = taskStatus === 'queued' || taskStatus === 'running';
+        const isTaskCompleted = taskStatus === 'completed';
+        const isTaskFailed = taskStatus === 'failed';
+        const taskBadgeLabel = isTaskRunning
+          ? (taskStatus === 'queued' ? 'Queued' : 'Running')
+          : (isTaskCompleted ? 'Done' : (isTaskFailed ? 'Failed' : ''));
+        const taskBadgeClass = isTaskRunning
+          ? 'border-blue-200 bg-blue-50 text-blue-700'
+          : (isTaskCompleted
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : (isTaskFailed ? 'border-red-200 bg-red-50 text-red-700' : ''));
+        const shareMode = String(session.shareMode || '').trim().toLowerCase();
+        const shareLabel = session.isShared
+          ? (shareMode === 'snapshot'
+              ? `Snapshot copy • Shared by ${session.sharedBy || 'unknown'}`
+              : `Collaborative • Shared by ${session.sharedBy || 'unknown'}`)
+          : 'Private chat';
 
         return (
           <div
@@ -75,7 +129,27 @@ export default function ChatHistory({
             role="button"
             tabIndex={0}
             data-chat-menu-root="true"
-            onClick={() => onChatSelect?.(session.id)}
+            onClick={(event) => {
+              if (longPressTriggeredRef.current) {
+                event.preventDefault();
+                event.stopPropagation();
+                longPressTriggeredRef.current = false;
+                return;
+              }
+              onChatSelect?.(session.id);
+            }}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              startLongPress(session.id, event.pointerType);
+            }}
+            onPointerMove={() => clearLongPressTimer()}
+            onPointerUp={() => clearLongPressTimer()}
+            onPointerCancel={() => clearLongPressTimer()}
+            onPointerLeave={() => clearLongPressTimer()}
+            onContextMenu={(event) => {
+              if (!longPressTriggeredRef.current) return;
+              event.preventDefault();
+            }}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
@@ -91,16 +165,30 @@ export default function ChatHistory({
             <div className="flex items-start justify-between gap-2 pr-8">
               <p className="font-semibold leading-5 break-words">{session.topic || 'Untitled Session'}</p>
             </div>
+            {taskBadgeLabel && (
+              <div className="mt-2">
+                <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${taskBadgeClass}`}>
+                  {(isTaskRunning || isTaskCompleted) && <span className={`h-1.5 w-1.5 rounded-full ${isTaskRunning ? 'bg-blue-600 animate-pulse' : 'bg-emerald-600'}`} />}
+                  {isTaskFailed && <span className="h-1.5 w-1.5 rounded-full bg-red-600" />}
+                  {taskBadgeLabel}
+                </span>
+              </div>
+            )}
 
             <button
               type="button"
               aria-label="Chat options"
-              className={`absolute right-2 top-2 h-6 w-6 rounded-md flex items-center justify-center text-slate-500 hover:bg-blue-100 hover:text-blue-900 ${
-                openMenuId === session.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              className={`absolute right-2 top-2 h-6 w-6 rounded-md flex items-center justify-center text-slate-500 hover:bg-blue-100 hover:text-blue-900 transition-opacity ${
+                openMenuId === session.id
+                  ? 'opacity-100'
+                  : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
               }`}
               onClick={(event) => {
                 event.stopPropagation();
                 setOpenMenuId((prev) => (prev === session.id ? null : session.id));
+              }}
+              onPointerDown={(event) => {
+                event.stopPropagation();
               }}
             >
               <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -149,9 +237,7 @@ export default function ChatHistory({
             )}
 
             <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
-              <span className="truncate">
-                {session.isShared ? `Shared by ${session.sharedBy || 'unknown'}` : 'Private chat'}
-              </span>
+              <span className="truncate">{shareLabel}</span>
               <span>{createdAtText}</span>
             </div>
           </div>

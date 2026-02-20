@@ -1,6 +1,6 @@
-# ResearchAI
+# Research-AI
 
-ResearchAI is a full-stack, backend-first research assistant:
+Research-AI is a full-stack, backend-first research assistant:
 
 - FastAPI backend with cookie-based auth, chat/session APIs, and a LangChain/LangGraph research runtime.
 - React + Vite frontend that acts as a thin UI client over backend APIs.
@@ -16,7 +16,7 @@ ResearchAI is a full-stack, backend-first research assistant:
 
 ## Benchmark Results
 
-ResearchAI was evaluated on the [DeepResearch Bench](https://github.com/Ayanami0730/deep_research_bench) benchmark with the following results:
+Research-AI was evaluated on the [DeepResearch Bench](https://github.com/Ayanami0730/deep_research_bench) benchmark with the following results:
 
 - Comprehensiveness: `0.5595`
 - Insight: `0.5930`
@@ -24,7 +24,7 @@ ResearchAI was evaluated on the [DeepResearch Bench](https://github.com/Ayanami0
 - Readability: `0.5253`
 - Overall Score: `0.5532`
 
-With these results, ResearchAI is at the **1st position on the leaderboard of DeepResearch Bench**.
+With these results, Research-AI is at the **1st position on the leaderboard of DeepResearch Bench**.
 
 ### Leaderboard Comparison Graphs
 
@@ -57,8 +57,11 @@ With these results, ResearchAI is at the **1st position on the leaderboard of De
 ### Frontend (`frontend/`)
 
 - `src/context/AuthContext.jsx`: backend auth state via `/auth/me`, cookie-based.
-- `src/lib/api.js`: centralized `fetch` with `credentials: "include"`.
-- `src/components/Chat/ChatInterface.jsx`: main chat UI + runtime controls + `/research` UX.
+- `src/context/useAuth.js`: shared auth hook for consuming context.
+- `src/lib/api.js`: centralized `fetch` with cookie auth, timeout, and abort support.
+- `src/components/Chat/ChatInterface.jsx`: chat composition/orchestration shell.
+- `src/components/Chat/hooks/*`: session loading, composer state, and research task polling.
+- `src/components/Chat/components/*`: split UI modules (layout, message list, modal views, sidebar).
 - `src/components/Chat/ChatHistory.jsx`: sidebar sessions + share/rename/delete actions.
 - `src/components/Auth/*`: email/password and Google login/signup screens.
 - `src/components/Feedback.jsx`: authenticated feedback form.
@@ -226,7 +229,15 @@ npm install
 npm run dev
 ```
 
-Frontend expects backend at `VITE_API_BASE_URL` and always sends cookies (`credentials: include`).
+Frontend expects backend at `VITE_API_BASE_URL` and uses cookie auth (`credentials: include`).
+
+Production deployment guardrails:
+
+- `VITE_API_BASE_URL` must point to your deployed backend origin.
+- Backend `CORS_ORIGINS` must include the exact frontend origin.
+- For cross-site frontend/backend hosting, backend cookies must use:
+  - `COOKIE_SECURE=true`
+  - `COOKIE_SAMESITE=none`
 
 ## Firestore Vector Index
 
