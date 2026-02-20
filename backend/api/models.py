@@ -39,8 +39,13 @@ class ChatRequest(BaseModel):
     force_research: bool = False
     model: Literal["mini", "pro"] = "pro"
     research_breadth: Literal["low", "medium", "high"] = "medium"
-    research_depth: Literal["low", "medium", "high"] = "high"
+    research_depth: Literal["low", "high"] = "high"
     document_length: Literal["low", "medium", "high"] = "high"
+
+
+class ChatResponse(BaseModel):
+    session_id: str
+    response: str
 
 
 class ChatSession(BaseModel):
@@ -49,8 +54,6 @@ class ChatSession(BaseModel):
     createdAt: str
     isShared: bool
     sharedBy: str | None = None
-    shareMode: Literal["collaborative", "snapshot"] | None = None
-    sourceSessionId: str | None = None
 
 
 class ChatSessionsResponse(BaseModel):
@@ -63,32 +66,8 @@ class ChatMessage(BaseModel):
     text: str
 
 
-class SessionTask(BaseModel):
-    id: str
-    type: Literal["research"]
-    status: Literal["queued", "running", "completed", "failed"]
-    current_node: str | None = None
-    progress_message: str | None = None
-
-
 class ChatMessagesResponse(BaseModel):
     messages: list[ChatMessage]
-    active_task: SessionTask | None = None
-
-
-class ChatResponseMessage(BaseModel):
-    kind: Literal["message"] = "message"
-    session_id: str
-    message: ChatMessage
-
-
-class ChatResponseTask(BaseModel):
-    kind: Literal["task"] = "task"
-    session_id: str
-    task: SessionTask
-
-
-ChatResponse = ChatResponseMessage | ChatResponseTask
 
 
 class RenameSessionRequest(BaseModel):
@@ -97,13 +76,6 @@ class RenameSessionRequest(BaseModel):
 
 class ShareSessionRequest(BaseModel):
     email: str
-    collaborative: bool = True
-
-
-class ShareSessionResponse(BaseModel):
-    ok: bool
-    mode: Literal["collaborative", "snapshot"]
-    shared_session_id: str
 
 
 class SessionMutationResponse(BaseModel):
@@ -119,14 +91,3 @@ class FeedbackRequest(BaseModel):
     feedbackType: str
     satisfaction: str
     comments: str
-
-
-class TaskStatusResponse(BaseModel):
-    id: str
-    type: Literal["research"]
-    status: Literal["queued", "running", "completed", "failed"]
-    session_id: str
-    current_node: str | None = None
-    progress_message: str | None = None
-    result: str | None = None
-    error: str | None = None

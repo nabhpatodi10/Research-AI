@@ -1,26 +1,22 @@
-import { useCallback, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { apiRequest, API_BASE_URL } from '../lib/api';
-import AuthContext from './authContextInstance';
+
+const AuthContext = createContext();
 
 export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchCurrentUser = useCallback(async () => {
-    const payload = await apiRequest('/auth/me', { method: 'GET' });
-    return payload?.user || null;
-  }, []);
-
-  const refreshUser = useCallback(async () => {
+  const refreshUser = async () => {
     try {
-      const user = await fetchCurrentUser();
-      setCurrentUser(user);
-      return user;
+      const payload = await apiRequest('/auth/me', { method: 'GET' });
+      setCurrentUser(payload?.user || null);
+      return payload?.user || null;
     } catch {
       setCurrentUser(null);
       return null;
     }
-  }, [fetchCurrentUser]);
+  };
 
   const signup = async (name, email, password) => {
     const payload = await apiRequest('/auth/signup', {
@@ -54,9 +50,9 @@ export function AuthProvider({ children }) {
 
     (async () => {
       try {
-        const user = await fetchCurrentUser();
+        const payload = await apiRequest('/auth/me', { method: 'GET' });
         if (!active) return;
-        setCurrentUser(user);
+        setCurrentUser(payload?.user || null);
       } catch {
         if (!active) return;
         setCurrentUser(null);
@@ -68,7 +64,7 @@ export function AuthProvider({ children }) {
     return () => {
       active = false;
     };
-  }, [fetchCurrentUser]);
+  }, []);
 
   const value = {
     currentUser,
@@ -85,4 +81,8 @@ export function AuthProvider({ children }) {
       {children}
     </AuthContext.Provider>
   );
+}
+
+export function useAuth() {
+  return useContext(AuthContext);
 }
