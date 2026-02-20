@@ -12,6 +12,7 @@ export default function ChatHistory({
   onRenameChat,
   onShareChat,
   searchTerm = '',
+  taskBySession = {},
 }) {
   const [openMenuId, setOpenMenuId] = useState(null);
   const longPressTimerRef = useRef(null);
@@ -102,6 +103,25 @@ export default function ChatHistory({
             })
           : '';
         const isActive = activeSessionId === session.id;
+        const task = taskBySession?.[session.id];
+        const taskStatus = String(task?.status || '').trim().toLowerCase();
+        const isTaskRunning = taskStatus === 'queued' || taskStatus === 'running';
+        const isTaskCompleted = taskStatus === 'completed';
+        const isTaskFailed = taskStatus === 'failed';
+        const taskBadgeLabel = isTaskRunning
+          ? (taskStatus === 'queued' ? 'Queued' : 'Running')
+          : (isTaskCompleted ? 'Done' : (isTaskFailed ? 'Failed' : ''));
+        const taskBadgeClass = isTaskRunning
+          ? 'border-blue-200 bg-blue-50 text-blue-700'
+          : (isTaskCompleted
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : (isTaskFailed ? 'border-red-200 bg-red-50 text-red-700' : ''));
+        const shareMode = String(session.shareMode || '').trim().toLowerCase();
+        const shareLabel = session.isShared
+          ? (shareMode === 'snapshot'
+              ? `Snapshot copy • Shared by ${session.sharedBy || 'unknown'}`
+              : `Collaborative • Shared by ${session.sharedBy || 'unknown'}`)
+          : 'Private chat';
 
         return (
           <div
@@ -145,6 +165,15 @@ export default function ChatHistory({
             <div className="flex items-start justify-between gap-2 pr-8">
               <p className="font-semibold leading-5 break-words">{session.topic || 'Untitled Session'}</p>
             </div>
+            {taskBadgeLabel && (
+              <div className="mt-2">
+                <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${taskBadgeClass}`}>
+                  {(isTaskRunning || isTaskCompleted) && <span className={`h-1.5 w-1.5 rounded-full ${isTaskRunning ? 'bg-blue-600 animate-pulse' : 'bg-emerald-600'}`} />}
+                  {isTaskFailed && <span className="h-1.5 w-1.5 rounded-full bg-red-600" />}
+                  {taskBadgeLabel}
+                </span>
+              </div>
+            )}
 
             <button
               type="button"
@@ -208,9 +237,7 @@ export default function ChatHistory({
             )}
 
             <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
-              <span className="truncate">
-                {session.isShared ? `Shared by ${session.sharedBy || 'unknown'}` : 'Private chat'}
-              </span>
+              <span className="truncate">{shareLabel}</span>
               <span>{createdAtText}</span>
             </div>
           </div>
