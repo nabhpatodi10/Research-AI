@@ -1,4 +1,4 @@
-const RICH_BLOCK_PATTERN = /```(chartjson|mermaid)[ \t]*\n([\s\S]*?)```/gi;
+const RICH_BLOCK_PATTERN = /```(chartjson|mermaid)[ \t]*\r?\n([\s\S]*?)```/gi;
 
 function makeMarkdownBlock(content) {
   return {
