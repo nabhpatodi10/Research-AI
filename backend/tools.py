@@ -1,14 +1,16 @@
 import asyncio
+from typing import Any
+
 from langchain_core.tools import tool, BaseTool
 from langchain_core.documents import Document
 from langchain_google_genai import ChatGoogleGenerativeAI
-from playwright.async_api import Browser
 
 from custom_search import CustomSearch
 from scrape import Scrape
 from database import Database
 from nodes import Nodes
 from pdf_processing import PdfProcessingService
+from settings import get_settings
 
 class Tools:
 
@@ -16,9 +18,10 @@ class Tools:
         self,
         session_id: str,
         database: Database,
-        browser: Browser,
+        browser: Any,
         research_depth: str = "high",
     ):
+        settings = get_settings()
         self.__search = CustomSearch()
         self.__database = database
         self.__session_id = session_id
@@ -29,14 +32,14 @@ class Tools:
             database=database,
         )
         self.__scrape = Scrape(browser, pdf_processor=self.__pdf_processor)
-        self.__web_search_total_timeout_seconds = 40.0
-        self.__scrape_timeout_seconds = 30.0
+        self.__web_search_total_timeout_seconds = settings.web_search_total_timeout_seconds
+        self.__scrape_timeout_seconds = settings.web_search_scrape_timeout_seconds
         if research_depth == "low":
-            self.__min_web_documents_before_stop = 1
+            self.__min_web_documents_before_stop = settings.min_web_documents_low
         elif research_depth == "medium":
-            self.__min_web_documents_before_stop = 2
+            self.__min_web_documents_before_stop = settings.min_web_documents_medium
         else:
-            self.__min_web_documents_before_stop = 4
+            self.__min_web_documents_before_stop = settings.min_web_documents_high
 
     async def __queue_pdf_fallback_if_needed(
         self,
@@ -135,7 +138,39 @@ class Tools:
         value_str = str(value).strip()
         return value_str if value_str else default
 
-    async def __web_search_impl(self, query: str) -> str:
+    async def __render_web_documents(self, documents: list[Document], summarize: bool = True) -> str:
+        if not documents:
+            return "Search results were found, but no scrapeable page content was extracted."
+
+        if summarize:
+            summaries = await asyncio.gather(*[self.__get_doc_summary(doc) for doc in documents])
+        else:
+            summaries = [doc.page_content for doc in documents]
+
+        rendered_rows = []
+        for index, doc in enumerate(documents):
+            summary_text = summaries[index]
+            if summary_text is None:
+                summary_text = doc.page_content
+            summary_text = str(summary_text or "").strip()
+            if not summary_text:
+                continue
+            rendered_rows.append(
+                f"Title: {self.__doc_meta_value(doc, 'title')}\n"
+                f"Content:{summary_text}\n"
+                f"Source: {self.__doc_meta_value(doc, 'source')}"
+            )
+
+        if not rendered_rows:
+            return "Search results were found, but no scrapeable page content was extracted."
+        return "\n----------------\n".join(rendered_rows)
+
+    async def __web_search_impl(
+        self,
+        query: str,
+        partial_documents: list[Document] | None = None,
+        runtime_state: dict[str, bool] | None = None,
+    ) -> str:
         __urls = await self.__search.search(query, 5)
         if not __urls:
             return "No search results found."
@@ -192,6 +227,8 @@ class Tools:
                         continue
                     seen_sources.add(source)
                     documents.append(doc)
+                    if partial_documents is not None:
+                        partial_documents.append(doc)
 
                     if len(documents) >= max_documents:
                         break
@@ -208,24 +245,37 @@ class Tools:
             return "Search results were found, but no scrapeable page content was extracted."
 
         await self.__database.add_data(self.__session_id, documents)
-        summaries = await asyncio.gather(*[self.__get_doc_summary(doc) for doc in documents])
-        return "\n----------------\n".join(
-            [
-                f"Title: {self.__doc_meta_value(doc, 'title')}\nContent:{summaries[_]}\nSource: {self.__doc_meta_value(doc, 'source')}"
-                for _, doc in enumerate(documents)
-                if summaries[_] is not None
-            ]
-        )
+        if runtime_state is not None:
+            runtime_state["persisted"] = True
+        return await self.__render_web_documents(documents, summarize=True)
 
     async def web_search_tool(self, query: str) -> str:
         """Web Search tool to access documents from the web based on the given search query"""
+        partial_documents: list[Document] = []
+        runtime_state = {"persisted": False}
         try:
             return await asyncio.wait_for(
-                self.__web_search_impl(query),
+                self.__web_search_impl(
+                    query,
+                    partial_documents=partial_documents,
+                    runtime_state=runtime_state,
+                ),
                 timeout=self.__web_search_total_timeout_seconds,
             )
         except asyncio.TimeoutError:
             print(f"Web search tool exceeded total timeout of {self.__web_search_total_timeout_seconds:.0f}s.")
+            if partial_documents:
+                if not runtime_state.get("persisted", False):
+                    try:
+                        await self.__database.add_data(self.__session_id, partial_documents)
+                    except Exception:
+                        pass
+
+                partial_output = await self.__render_web_documents(partial_documents, summarize=False)
+                return (
+                    f"{partial_output}\n\n"
+                    "[Note: web search timed out before full completion. Returning partial results.]"
+                )
             return "An error occured: web search tool timed out, you can try again with a different query."
         except Exception as e:
             return f"An error occured: {str(e)}"
