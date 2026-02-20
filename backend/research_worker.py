@@ -1,5 +1,5 @@
 import asyncio
-import os
+import logging
 from typing import Any
 from uuid import uuid4
 
@@ -8,27 +8,12 @@ from playwright.async_api import Browser
 
 from database import Database
 from graph import ResearchGraph
+from research_progress import progress_message_for_node
+from settings import get_settings
 from structures import CompleteDocument
 
 
-def _to_float(value: str | None, default: float) -> float:
-    if value is None:
-        return default
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed > 0 else default
-
-
-def _to_int(value: str | None, default: int) -> int:
-    if value is None:
-        return default
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed > 0 else default
+logger = logging.getLogger(__name__)
 
 
 class ResearchExecutionService:
@@ -56,7 +41,12 @@ class ResearchExecutionService:
             return "The research workflow completed, but no final document was returned."
         return str(final_document)
 
-    async def run(self, job: dict[str, Any]) -> str:
+    async def run(
+        self,
+        job: dict[str, Any],
+        progress_callback: Any = None,
+        checkpoint_callback: Any = None,
+    ) -> str:
         session_id = str(job.get("sessionId") or "").strip()
         request = job.get("request")
         if not isinstance(request, dict):
@@ -77,8 +67,18 @@ class ResearchExecutionService:
             research_breadth=research_breadth,
             research_depth=research_depth,
             document_length=document_length,
+            progress_callback=progress_callback,
         )
-        result = await graph.graph.ainvoke({"research_idea": research_idea})
+        saved_graph_state = job.get("graphState")
+        if not isinstance(saved_graph_state, dict):
+            saved_graph_state = {}
+        resume_from_node = str(job.get("resumeFromNode") or "").strip() or None
+        result = await graph.run_resumable(
+            research_idea=research_idea,
+            graph_state=saved_graph_state,
+            resume_from_node=resume_from_node,
+            checkpoint_callback=checkpoint_callback,
+        )
         final_text = self._extract_document_text(result.get("final_document")).strip()
         if not final_text:
             raise ValueError("Research workflow returned empty content.")
@@ -89,17 +89,12 @@ class ResearchExecutionService:
 
 class ResearchBackgroundWorker:
     def __init__(self, database: Database, browser: Browser):
+        settings = get_settings()
         self._database = database
         self._worker_id = str(uuid4())
-        self._poll_interval_seconds = _to_float(
-            os.getenv("RESEARCH_BACKGROUND_POLL_INTERVAL_SECONDS"), 1.0
-        )
-        self._batch_size = _to_int(
-            os.getenv("RESEARCH_BACKGROUND_BATCH_SIZE"), 8
-        )
-        self._max_retries = _to_int(
-            os.getenv("RESEARCH_BACKGROUND_MAX_RETRIES"), 2
-        )
+        self._poll_interval_seconds = settings.research_background_poll_interval_seconds
+        self._batch_size = settings.research_background_batch_size
+        self._max_retries = settings.research_background_max_retries
         self._execution_service = ResearchExecutionService(database=database, browser=browser)
 
     async def _process_job(self, job: dict[str, Any]) -> None:
@@ -117,22 +112,56 @@ class ResearchBackgroundWorker:
                 )
             return
 
+        resume_from_node = str(job.get("resumeFromNode") or "").strip() or None
+        current_node_tracker = resume_from_node or "preparing"
+
         await self._database.set_user_session_active_task_status(
             user_id=user_id,
             session_id=session_id,
             task_id=job_id,
             status="running",
         )
+        await self._database.update_research_job_progress(
+            job_id=job_id,
+            current_node=current_node_tracker,
+            progress_message=progress_message_for_node(current_node_tracker),
+            status="running",
+        )
 
         try:
-            result_text = await self._execution_service.run(job)
+            async def _progress(node_name: str) -> None:
+                nonlocal current_node_tracker
+                current_node_tracker = str(node_name or "").strip() or current_node_tracker
+                await self._database.update_research_job_progress(
+                    job_id=job_id,
+                    current_node=node_name,
+                    progress_message=progress_message_for_node(node_name),
+                    status="running",
+                )
+
+            async def _checkpoint(
+                completed_node: str,
+                graph_state: dict[str, Any],
+                next_node: str | None,
+            ) -> None:
+                await self._database.update_research_job_checkpoint(
+                    job_id=job_id,
+                    graph_state=graph_state,
+                    resume_from_node=next_node,
+                )
+
+            result_text = await self._execution_service.run(
+                job,
+                progress_callback=_progress,
+                checkpoint_callback=_checkpoint,
+            )
             await self._database.mark_research_job_completed(job_id=job_id, result_text=result_text)
             await self._database.clear_user_session_active_task_if_matches(
                 user_id=user_id,
                 session_id=session_id,
                 task_id=job_id,
             )
-            print(f"[research-worker] Completed research job {job_id} for session {session_id}.")
+            logger.info("Completed research job %s for session %s.", job_id, session_id)
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -142,14 +171,18 @@ class ResearchBackgroundWorker:
                     job_id=job_id,
                     error_message=str(error),
                     attempts=next_attempt,
+                    resume_from_node=current_node_tracker,
                 )
                 await self._database.clear_user_session_active_task_if_matches(
                     user_id=user_id,
                     session_id=session_id,
                     task_id=job_id,
                 )
-                print(
-                    f"[research-worker] Job {job_id} failed permanently after {next_attempt} attempts: {error}"
+                logger.error(
+                    "Job %s failed permanently after %s attempts: %s",
+                    job_id,
+                    next_attempt,
+                    error,
                 )
                 return
 
@@ -159,6 +192,7 @@ class ResearchBackgroundWorker:
                 attempts=next_attempt,
                 error_message=str(error),
                 delay_seconds=retry_delay_seconds,
+                resume_from_node=current_node_tracker,
             )
             await self._database.set_user_session_active_task_status(
                 user_id=user_id,
@@ -166,8 +200,11 @@ class ResearchBackgroundWorker:
                 task_id=job_id,
                 status="queued",
             )
-            print(
-                f"[research-worker] Requeued job {job_id} attempt {next_attempt} after error: {error}"
+            logger.warning(
+                "Requeued job %s attempt %s after error: %s",
+                job_id,
+                next_attempt,
+                error,
             )
 
     async def run_forever(self) -> None:
@@ -200,7 +237,7 @@ class ResearchBackgroundWorker:
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
-                    print(f"[research-worker] Loop error: {error}")
+                    logger.exception("Research worker loop error: %s", error)
                     await asyncio.sleep(self._poll_interval_seconds)
         finally:
             if not active_tasks:
