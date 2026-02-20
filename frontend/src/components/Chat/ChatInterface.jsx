@@ -1,10 +1,20 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import { Dialog, Transition } from '@headlessui/react';
-import { useAuth } from '../../context/AuthContext';
+import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { Transition } from '@headlessui/react';
+import { useAuth } from '../../context/useAuth';
 import { apiRequest } from '../../lib/api';
-import ChatHistory from './ChatHistory';
-import MarkdownRenderer from './MarkdownRenderer';
-import RichAssistantMessage from './RichAssistantMessage';
+import ChatLayout from './components/ChatLayout';
+import ChatModals from './components/ChatModals';
+import MessageList from './components/MessageList';
+import SidebarContent from './components/SidebarContent';
+import { parseResearchCommand, useChatComposer } from './hooks/useChatComposer';
+import { useChatSessions } from './hooks/useChatSessions';
+import { getResearchPendingMessageId, useResearchTasks } from './hooks/useResearchTasks';
+import {
+  NEW_SESSION_KEY,
+  chatReducer,
+  getSessionGenerating,
+  initialChatState,
+} from './reducer/chatReducer';
 
 const createClientMessageId = () => {
   const uuid = globalThis.crypto?.randomUUID?.();
@@ -25,42 +35,8 @@ const QUICK_PROMPTS = [
   'Build a launch-ready research brief for an AI tutor product.',
 ];
 
-const COMMAND_OPTIONS = [
-  {
-    command: '/research',
-    label: '/research',
-    description: 'Run deep research and generate a full research document.',
-  },
-];
-
-const RESEARCH_COMMAND_PATTERN = /^\s*\/research(?:\s+([\s\S]*))?$/i;
-
-const parseResearchCommand = (value) => {
-  const raw = String(value ?? '');
-  const matched = raw.match(RESEARCH_COMMAND_PATTERN);
-  if (!matched) {
-    return { isResearchCommand: false, topic: '', isEmptyResearchCommand: false };
-  }
-  const topic = String(matched[1] ?? '').trim();
-  return {
-    isResearchCommand: true,
-    topic,
-    isEmptyResearchCommand: topic.length === 0,
-  };
-};
-
-const getSlashTokenInfo = (value, cursorPosition) => {
-  const text = String(value ?? '');
-  const cursor = Number.isFinite(cursorPosition) ? cursorPosition : text.length;
-  const head = text.slice(0, cursor);
-  const tokenMatch = head.match(/(?:^|\s)(\/[^\s]*)$/);
-  if (!tokenMatch) return null;
-  const token = tokenMatch[1];
-  const start = head.length - token.length;
-  return { token, start, end: cursor };
-};
-
 const CHAT_SETTINGS_STORAGE_KEY = 'ra-chat-settings-v1';
+const AUTO_OPEN_RECENT_SESSION = true;
 const DEFAULT_CHAT_SETTINGS = {
   model: 'pro',
   research_breadth: 'medium',
@@ -108,140 +84,46 @@ const findLastUserMessageIndex = (items) => {
   return -1;
 };
 
-const RESEARCH_STATUS_POLL_INTERVAL_MS = 1000;
-
-const normalizeResearchStatus = (status) => {
-  const normalized = String(status || '').trim().toLowerCase();
-  if (normalized === 'queued' || normalized === 'running' || normalized === 'completed' || normalized === 'failed') {
-    return normalized;
-  }
-  return 'failed';
+const isResearchTaskOngoing = (task) => {
+  const status = String(task?.status || '').trim().toLowerCase();
+  return status === 'queued' || status === 'running';
 };
-
-const getResearchPendingMessageId = (researchId) => `pending-research-${researchId}`;
-
-const SidebarContent = ({
-  sessions,
-  sessionsLoading,
-  sessionsError,
-  activeSessionId,
-  searchTerm,
-  setSearchTerm,
-  handleNewChat,
-  handleDeleteChat,
-  handleRenameChat,
-  handleShareChat,
-  loadChat,
-}) => (
-  <>
-    <div className="border-b border-blue-100 px-4 pb-4 pt-3">
-      <div className="rounded-2xl border border-blue-100/80 bg-gradient-to-br from-blue-50 via-white to-slate-50 p-4 shadow-sm">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-700">Workspace</p>
-        <h1 className="brand-display mt-1 text-xl font-bold text-blue-900">ResearchAI Chat</h1>
-        <p className="mt-2 text-xs text-slate-500">{sessions.length} sessions available</p>
-
-        <button
-          onClick={handleNewChat}
-          className="mt-4 w-full rounded-xl bg-blue-900 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-800"
-        >
-          + New chat
-        </button>
-      </div>
-
-      <div className="mt-3 relative">
-        <svg
-          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" />
-        </svg>
-        <input
-          type="text"
-          placeholder="Search sessions"
-          value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
-          onClick={(event) => event.stopPropagation()}
-          onKeyDown={(event) => event.stopPropagation()}
-          className="w-full rounded-xl border border-blue-100 bg-white px-9 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-        />
-      </div>
-    </div>
-
-    <div className="flex-1 overflow-y-auto no-scrollbar px-3 pb-6 pt-3">
-      <ChatHistory
-        sessions={sessions}
-        loading={sessionsLoading}
-        error={sessionsError}
-        activeSessionId={activeSessionId}
-        onChatSelect={loadChat}
-        onDeleteChat={handleDeleteChat}
-        onRenameChat={handleRenameChat}
-        onShareChat={handleShareChat}
-        searchTerm={searchTerm}
-      />
-    </div>
-  </>
-);
-
-function MessageBubble({ msg }) {
-  if (msg.status === 'pending') {
-    return (
-      <div className="max-w-full rounded-2xl border border-blue-200 bg-white px-4 py-3 shadow-sm md:max-w-[78%]">
-        <div className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-blue-900 animate-bounce [animation-delay:-0.2s]" />
-          <span className="h-2 w-2 rounded-full bg-blue-900 animate-bounce [animation-delay:-0.1s]" />
-          <span className="h-2 w-2 rounded-full bg-blue-900 animate-bounce" />
-        </div>
-      </div>
-    );
-  }
-
-  const isUser = msg.sender === 'user';
-  const isAssistant = msg.sender === 'ai';
-
-  if (isUser) {
-    return (
-      <div className="max-w-full overflow-hidden rounded-2xl bg-blue-900 text-white shadow-sm md:max-w-[78%]">
-        <div className="whitespace-pre-wrap break-words px-4 py-3 text-sm leading-6">
-          {msg.text}
-        </div>
-      </div>
-    );
-  }
-
-  if (isAssistant) {
-    return (
-      <div className="max-w-full overflow-hidden rounded-2xl border border-blue-100 bg-white text-slate-800 shadow-sm md:max-w-[78%]">
-        <RichAssistantMessage content={msg.text} />
-      </div>
-    );
-  }
-
-  const markdownVariant = 'error';
-
-  return (
-    <div className="max-w-full overflow-hidden rounded-2xl border border-red-200 bg-red-50 text-red-700 shadow-sm md:max-w-[78%]">
-      <MarkdownRenderer content={msg.text} variant={markdownVariant} />
-    </div>
-  );
-}
 
 export default function ChatInterface() {
   const { currentUser } = useAuth();
+  const [chatState, dispatch] = useReducer(chatReducer, initialChatState);
+  const { messages, chatLoading } = chatState;
 
-  const [sessions, setSessions] = useState([]);
-  const [sessionsLoading, setSessionsLoading] = useState(true);
-  const [sessionsError, setSessionsError] = useState('');
-
-  const [messages, setMessages] = useState([]);
-  const [chatLoading, setChatLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [sessionTitle, setSessionTitle] = useState('');
 
-  const [input, setInput] = useState('');
-  const [isGeneratingResponse, setIsGeneratingResponse] = useState(false);
+  const {
+    sessions,
+    sessionsLoading,
+    sessionsError,
+    setSessionsError,
+    loadSessions,
+    loadChatMessages,
+    renameSession,
+    deleteSession,
+    shareSession,
+  } = useChatSessions();
+
+  const {
+    input,
+    setInput,
+    composerError,
+    setComposerError,
+    showCommandMenu,
+    commandSuggestions,
+    activeCommandIndex,
+    setActiveCommandIndex,
+    closeCommandMenu,
+    updateCommandSuggestions,
+    applyCommandSuggestion,
+    isEmptyResearchCommand,
+  } = useChatComposer();
+
   const [chatSettings, setChatSettings] = useState(() => {
     if (typeof window === 'undefined') {
       return { ...DEFAULT_CHAT_SETTINGS };
@@ -265,26 +147,24 @@ export default function ChatInterface() {
   const [shareSessionId, setShareSessionId] = useState(null);
   const [shareSessionTitle, setShareSessionTitle] = useState('');
   const [shareEmail, setShareEmail] = useState('');
+  const [shareCollaborative, setShareCollaborative] = useState(true);
   const [shareLoading, setShareLoading] = useState(false);
   const [shareError, setShareError] = useState('');
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => isDesktopViewport());
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(() => isDesktopViewport());
   const [searchTerm, setSearchTerm] = useState('');
-  const [composerError, setComposerError] = useState('');
-  const [showCommandMenu, setShowCommandMenu] = useState(false);
-  const [commandSuggestions, setCommandSuggestions] = useState([]);
-  const [activeCommandIndex, setActiveCommandIndex] = useState(0);
-  const [activeResearchTask, setActiveResearchTask] = useState(null);
 
   const sessionIdRef = useRef(sessionId);
-  const isGeneratingRef = useRef(false);
-  const activeResearchTaskRef = useRef(activeResearchTask);
   const composerRef = useRef(null);
   const chatScrollContainerRef = useRef(null);
-  const commandTokenRangeRef = useRef({ start: 0, end: 0 });
   const shouldScrollToLoadedUserMessageRef = useRef(false);
   const loadedUserMessageIndexRef = useRef(-1);
+  const hasAttemptedAutoOpenRef = useRef(false);
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
 
   const applySessionTitleFromList = useCallback((allSessions, targetSessionId) => {
     if (!targetSessionId) return;
@@ -294,41 +174,141 @@ export default function ChatInterface() {
     }
   }, []);
 
-  const loadSessions = useCallback(
-    async ({ silent = false } = {}) => {
-      if (!silent) setSessionsLoading(true);
+  const refreshSessions = useCallback(
+    async ({ silent = true } = {}) =>
+      loadSessions({
+        silent,
+        activeSessionId: sessionIdRef.current,
+        onApplySessionTitle: applySessionTitleFromList,
+      }),
+    [applySessionTitleFromList, loadSessions]
+  );
+
+  const ensurePendingResearchMessage = useCallback((pendingMessageId) => {
+    dispatch({ type: 'ADD_PENDING_RESEARCH_MESSAGE', pendingMessageId });
+  }, []);
+
+  const handleTaskCompletedInActiveSession = useCallback(({ sessionId: taskSessionId, pendingMessageId, responseText, messageId }) => {
+    dispatch({
+      type: 'TASK_DONE',
+      sessionId: taskSessionId,
+      pendingMessageId,
+      responseText,
+      messageId,
+    });
+  }, []);
+
+  const handleTaskFailedInActiveSession = useCallback(({ sessionId: taskSessionId, pendingMessageId, errorText, messageId }) => {
+    dispatch({
+      type: 'TASK_FAILED',
+      sessionId: taskSessionId,
+      pendingMessageId,
+      errorText,
+      messageId,
+    });
+  }, []);
+
+  const handleTaskProgressInActiveSession = useCallback(
+    ({ sessionId: taskSessionId, pendingMessageId, progressText }) => {
+      dispatch({
+        type: 'TASK_PROGRESS',
+        sessionId: taskSessionId,
+        pendingMessageId,
+        progressText,
+      });
+    },
+    []
+  );
+
+  const {
+    taskBySession,
+    upsertSessionTask,
+    acknowledgeTerminalTask,
+    applyActiveTaskSnapshot,
+    refreshActiveTaskForSession,
+    hasAnyOngoingTask,
+    hasOngoingTaskForSession,
+  } = useResearchTasks({
+    sessionIdRef,
+    ensurePendingMessage: ensurePendingResearchMessage,
+    onTaskCompletedInActiveSession: handleTaskCompletedInActiveSession,
+    onTaskFailedInActiveSession: handleTaskFailedInActiveSession,
+    onTaskMissingInActiveSession: handleTaskFailedInActiveSession,
+    onTaskProgressInActiveSession: handleTaskProgressInActiveSession,
+    createClientMessageId,
+    refreshSessions: () => refreshSessions({ silent: true }),
+  });
+
+  const activeSessionTask = sessionId ? taskBySession[sessionId] : null;
+  const hasActiveResearchTaskForCurrentSession = isResearchTaskOngoing(activeSessionTask);
+  const isGeneratingResponse = getSessionGenerating(chatState, sessionId || NEW_SESSION_KEY);
+  const isInteractionLocked = chatLoading || isGeneratingResponse || hasActiveResearchTaskForCurrentSession;
+  const showAgentActivity = isGeneratingResponse || hasActiveResearchTaskForCurrentSession;
+
+  useEffect(() => {
+    if (!currentUser) {
+      hasAttemptedAutoOpenRef.current = false;
+      return;
+    }
+
+    void refreshSessions({ silent: false });
+  }, [currentUser, refreshSessions]);
+
+  const loadChat = useCallback(
+    async (selectedSessionId, { closeSidebarOnMobile = true } = {}) => {
+      if (!selectedSessionId) return;
+
       try {
-        const payload = await apiRequest('/chat/sessions', { method: 'GET' });
-        const loadedSessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
-        setSessions(loadedSessions);
-        setSessionsError('');
-        applySessionTitleFromList(loadedSessions, sessionIdRef.current);
+        dispatch({ type: 'LOAD_CHAT_START' });
+        const { stale, payload } = await loadChatMessages(selectedSessionId, { timeoutMs: 30_000 });
+        if (stale || !payload) return;
+
+        const loadedMessages = Array.isArray(payload?.messages) ? payload.messages : [];
+        loadedUserMessageIndexRef.current = findLastUserMessageIndex(loadedMessages);
+        shouldScrollToLoadedUserMessageRef.current = true;
+
+        dispatch({ type: 'LOAD_CHAT_SUCCESS', messages: loadedMessages });
+        setSessionId(selectedSessionId);
+        sessionIdRef.current = selectedSessionId;
+        applyActiveTaskSnapshot(payload?.active_task, selectedSessionId);
+        applySessionTitleFromList(sessions, selectedSessionId);
+
+        if (closeSidebarOnMobile && window.innerWidth < 768) {
+          setIsSidebarOpen(false);
+        }
+
+        acknowledgeTerminalTask(selectedSessionId);
       } catch (error) {
-        console.error('Error loading sessions:', error);
-        setSessionsError(error.message || 'Failed to load chat history');
-      } finally {
-        if (!silent) setSessionsLoading(false);
+        console.error('Error loading chat:', error);
+        shouldScrollToLoadedUserMessageRef.current = false;
+        loadedUserMessageIndexRef.current = -1;
+        dispatch({
+          type: 'LOAD_CHAT_ERROR',
+          message: error.message || 'Failed to load chat history.',
+        });
       }
     },
-    [applySessionTitleFromList]
+    [
+      acknowledgeTerminalTask,
+      applyActiveTaskSnapshot,
+      applySessionTitleFromList,
+      loadChatMessages,
+      sessions,
+    ]
   );
 
   useEffect(() => {
-    sessionIdRef.current = sessionId;
-  }, [sessionId]);
-
-  useEffect(() => {
-    activeResearchTaskRef.current = activeResearchTask;
-  }, [activeResearchTask]);
-
-  const hasActiveResearchTask = Boolean(activeResearchTask);
-  const isInteractionLocked = chatLoading || isGeneratingResponse || hasActiveResearchTask;
-  const showAgentActivity = isGeneratingResponse || hasActiveResearchTask;
-
-  useEffect(() => {
     if (!currentUser) return;
-    loadSessions();
-  }, [currentUser, loadSessions]);
+    if (sessionsLoading) return;
+    if (hasAttemptedAutoOpenRef.current) return;
+
+    hasAttemptedAutoOpenRef.current = true;
+    if (!AUTO_OPEN_RECENT_SESSION) return;
+    if (sessionIdRef.current) return;
+    if (!Array.isArray(sessions) || sessions.length === 0) return;
+
+    void loadChat(sessions[0].id, { closeSidebarOnMobile: false });
+  }, [currentUser, loadChat, sessions, sessionsLoading]);
 
   const resizeComposer = useCallback(() => {
     const textarea = composerRef.current;
@@ -383,7 +363,7 @@ export default function ChatInterface() {
 
     shouldScrollToLoadedUserMessageRef.current = false;
     loadedUserMessageIndexRef.current = -1;
-  }, [messages, chatLoading]);
+  }, [chatLoading, messages]);
 
   const updateChatSetting = (key, value) => {
     setChatSettings((prev) =>
@@ -394,252 +374,8 @@ export default function ChatInterface() {
     );
   };
 
-  const closeCommandMenu = useCallback(() => {
-    setShowCommandMenu(false);
-    setCommandSuggestions([]);
-    setActiveCommandIndex(0);
-  }, []);
-
-  const updateCommandSuggestions = useCallback(
-    (value, cursorPosition) => {
-      const tokenInfo = getSlashTokenInfo(value, cursorPosition);
-      if (!tokenInfo || !tokenInfo.token.startsWith('/')) {
-        closeCommandMenu();
-        return;
-      }
-
-      const tokenLower = tokenInfo.token.toLowerCase();
-      const suggestions = COMMAND_OPTIONS.filter((option) =>
-        option.command.toLowerCase().startsWith(tokenLower)
-      );
-      if (suggestions.length === 0) {
-        closeCommandMenu();
-        return;
-      }
-
-      commandTokenRangeRef.current = { start: tokenInfo.start, end: tokenInfo.end };
-      setCommandSuggestions(suggestions);
-      setActiveCommandIndex(0);
-      setShowCommandMenu(true);
-    },
-    [closeCommandMenu]
-  );
-
-  const applyCommandSuggestion = useCallback(
-    (command) => {
-      const textarea = composerRef.current;
-      const sourceText = textarea?.value ?? input;
-      const { start, end } = commandTokenRangeRef.current;
-      const before = sourceText.slice(0, start);
-      const after = sourceText.slice(end);
-      const inserted = `${command} `;
-      const nextValue = `${before}${inserted}${after}`;
-      const nextCursor = before.length + inserted.length;
-
-      setInput(nextValue);
-      setComposerError('');
-      closeCommandMenu();
-
-      requestAnimationFrame(() => {
-        const target = composerRef.current;
-        if (!target) return;
-        target.focus();
-        target.setSelectionRange(nextCursor, nextCursor);
-      });
-    },
-    [closeCommandMenu, input]
-  );
-
-  const ensurePendingResearchMessage = useCallback((pendingMessageId) => {
-    setMessages((prev) => {
-      const alreadyPresent = prev.some((message) => message.id === pendingMessageId);
-      if (alreadyPresent) return prev;
-      return [
-        ...prev,
-        {
-          id: pendingMessageId,
-          text: 'Research is in progress. Final document will appear here once complete.',
-          sender: 'ai',
-          status: 'pending',
-        },
-      ];
-    });
-  }, []);
-
-  const syncSessionTaskStatus = useCallback(
-    async (targetSessionId) => {
-      if (!targetSessionId) return null;
-      try {
-        const payload = await apiRequest(`/chat/sessions/${targetSessionId}/task-status`, { method: 'GET' });
-        const activeTask = payload?.active_task;
-        const taskId = String(activeTask?.id || '').trim();
-        const taskType = String(activeTask?.type || '').trim();
-        const taskStatus = normalizeResearchStatus(activeTask?.status);
-
-        if (taskId && taskType === 'research' && (taskStatus === 'queued' || taskStatus === 'running')) {
-          const fallbackPendingMessageId = getResearchPendingMessageId(taskId);
-          const previousTask = activeResearchTaskRef.current;
-          const resolvedPendingMessageId =
-            previousTask && previousTask.researchId === taskId
-              ? String(previousTask.pendingMessageId || fallbackPendingMessageId)
-              : fallbackPendingMessageId;
-          setActiveResearchTask({
-            researchId: taskId,
-            sessionId: targetSessionId,
-            status: taskStatus,
-            pendingMessageId: resolvedPendingMessageId,
-          });
-          if (sessionIdRef.current === targetSessionId) {
-            ensurePendingResearchMessage(resolvedPendingMessageId);
-          }
-          return { researchId: taskId, status: taskStatus };
-        }
-
-        setActiveResearchTask((prev) => {
-          if (!prev) return null;
-          if (prev.sessionId !== targetSessionId) return prev;
-          return null;
-        });
-        return null;
-      } catch (error) {
-        console.error('Error checking task status:', error);
-        return null;
-      }
-    },
-    [ensurePendingResearchMessage]
-  );
-
-  useEffect(() => {
-    if (!sessionId) return undefined;
-    if (activeResearchTaskRef.current?.sessionId === sessionId) return undefined;
-
-    let cancelled = false;
-    const runSingleTaskStatusSync = async () => {
-      if (cancelled) return;
-      await syncSessionTaskStatus(sessionId);
-    };
-
-    runSingleTaskStatusSync();
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId, syncSessionTaskStatus]);
-
-  useEffect(() => {
-    if (!activeResearchTask?.researchId) return undefined;
-
-    let cancelled = false;
-    const pollResearchStatus = async () => {
-      if (cancelled) return;
-      const taskSnapshot = activeResearchTaskRef.current;
-      if (!taskSnapshot?.researchId) return;
-
-      const { researchId, sessionId: taskSessionId, pendingMessageId } = taskSnapshot;
-
-      try {
-        const statusPayload = await apiRequest(`/chat/research/${researchId}/status`, { method: 'GET' });
-        if (cancelled) return;
-        const status = normalizeResearchStatus(statusPayload?.status);
-
-        if (status === 'queued' || status === 'running') {
-          setActiveResearchTask((prev) => {
-            if (!prev || prev.researchId !== researchId) return prev;
-            if (prev.status === status) return prev;
-            return { ...prev, status };
-          });
-          return;
-        }
-
-        if (status === 'failed') {
-          const failureText = String(statusPayload?.error || 'Research failed. Please try again.');
-          if (sessionIdRef.current === taskSessionId) {
-            setMessages((prev) =>
-              prev.map((message) =>
-                message.id === pendingMessageId
-                  ? { ...message, text: failureText, sender: 'ai-error', status: 'error' }
-                  : message
-              )
-            );
-          }
-          setActiveResearchTask(null);
-          setIsGeneratingResponse(false);
-          isGeneratingRef.current = false;
-          await loadSessions({ silent: true });
-          return;
-        }
-
-        const resultPayload = await apiRequest(`/chat/research/${researchId}/result`, { method: 'GET' });
-        if (cancelled) return;
-
-        const responseText = String(resultPayload?.response || '').trim();
-        if (!responseText) {
-          throw new Error('Research completed but no response text was returned.');
-        }
-
-        if (sessionIdRef.current === taskSessionId) {
-          setMessages((prev) => {
-            const pendingIndex = prev.findIndex((message) => message.id === pendingMessageId);
-            if (pendingIndex >= 0) {
-              return prev.map((message, index) =>
-                index === pendingIndex
-                  ? { ...message, text: responseText, sender: 'ai', status: 'done' }
-                  : message
-              );
-            }
-
-            const lastMessage = prev[prev.length - 1];
-            const lastText = String(lastMessage?.text || '').trim();
-            if (lastMessage?.sender === 'ai' && lastText === responseText) {
-              return prev;
-            }
-
-            return [...prev, { id: `ai-${createClientMessageId()}`, text: responseText, sender: 'ai' }];
-          });
-        }
-
-        setActiveResearchTask(null);
-        setIsGeneratingResponse(false);
-        isGeneratingRef.current = false;
-        await loadSessions({ silent: true });
-      } catch (error) {
-        if (cancelled) return;
-        const errorMessage = String(error?.message || '');
-        if (!errorMessage.toLowerCase().includes('not found')) {
-          console.error('Error polling research status:', error);
-          return;
-        }
-
-        if (sessionIdRef.current === taskSessionId) {
-          setMessages((prev) =>
-            prev.map((message) =>
-              message.id === pendingMessageId
-                ? {
-                    ...message,
-                    text: 'Research task could not be found. Please retry.',
-                    sender: 'ai-error',
-                    status: 'error',
-                  }
-                : message
-            )
-          );
-        }
-
-        setActiveResearchTask(null);
-        setIsGeneratingResponse(false);
-        isGeneratingRef.current = false;
-      }
-    };
-
-    pollResearchStatus();
-    const intervalId = window.setInterval(pollResearchStatus, RESEARCH_STATUS_POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [activeResearchTask, loadSessions]);
-
   const handleNewChat = () => {
-    setMessages([]);
+    dispatch({ type: 'RESET_CHAT_VIEW' });
     setInput('');
     setSessionTitle('');
     setSessionId(null);
@@ -653,6 +389,7 @@ export default function ChatInterface() {
     closeCommandMenu();
     shouldScrollToLoadedUserMessageRef.current = false;
     loadedUserMessageIndexRef.current = -1;
+    hasAttemptedAutoOpenRef.current = true;
   };
 
   const handleRenameChat = (targetSessionId, currentTitle = 'Untitled Session') => {
@@ -683,19 +420,9 @@ export default function ChatInterface() {
     setRenameLoading(true);
     setRenameError('');
     try {
-      const payload = await apiRequest(`/chat/sessions/${renameSessionId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ topic: nextTitle }),
-      });
-
-      const updated = payload?.session;
-      if (updated) {
-        setSessions((prev) =>
-          prev.map((session) => (session.id === updated.id ? { ...session, ...updated } : session))
-        );
-      }
-      if (renameSessionId === sessionIdRef.current) {
-        setSessionTitle(nextTitle);
+      const updated = await renameSession(renameSessionId, nextTitle);
+      if (updated && renameSessionId === sessionIdRef.current) {
+        setSessionTitle(updated.topic || nextTitle);
       }
       closeRenameModal();
     } catch (error) {
@@ -712,9 +439,7 @@ export default function ChatInterface() {
     if (!shouldDelete) return;
 
     try {
-      await apiRequest(`/chat/sessions/${targetSessionId}`, { method: 'DELETE' });
-      setSessions((prev) => prev.filter((session) => session.id !== targetSessionId));
-
+      await deleteSession(targetSessionId);
       if (targetSessionId === sessionIdRef.current) {
         handleNewChat();
       }
@@ -728,6 +453,7 @@ export default function ChatInterface() {
     if (!targetSessionId) return;
     setShareSessionId(targetSessionId);
     setShareSessionTitle(targetTitle);
+    setShareCollaborative(true);
     setShareError('');
     setIsShareModalOpen(true);
   };
@@ -738,41 +464,12 @@ export default function ChatInterface() {
     setShareEmail('');
     setShareSessionId(null);
     setShareSessionTitle('');
-  };
-
-  const loadChat = async (selectedSessionId) => {
-    if (!selectedSessionId) return;
-
-    try {
-      setChatLoading(true);
-      setMessages([]);
-      const payload = await apiRequest(`/chat/sessions/${selectedSessionId}/messages`, {
-        method: 'GET',
-      });
-      const loadedMessages = Array.isArray(payload?.messages) ? payload.messages : [];
-      loadedUserMessageIndexRef.current = findLastUserMessageIndex(loadedMessages);
-      shouldScrollToLoadedUserMessageRef.current = true;
-      setMessages(loadedMessages);
-      setSessionId(selectedSessionId);
-      sessionIdRef.current = selectedSessionId;
-      applySessionTitleFromList(sessions, selectedSessionId);
-
-      if (window.innerWidth < 768) {
-        setIsSidebarOpen(false);
-      }
-    } catch (error) {
-      console.error('Error loading chat:', error);
-      shouldScrollToLoadedUserMessageRef.current = false;
-      loadedUserMessageIndexRef.current = -1;
-      setMessages([{ id: 'system-error', text: 'Failed to load chat history.', sender: 'ai-error' }]);
-    } finally {
-      setChatLoading(false);
-    }
+    setShareCollaborative(true);
   };
 
   const handleSend = async (event) => {
     event.preventDefault();
-    if (isGeneratingRef.current || chatLoading || hasActiveResearchTask) return;
+    if (chatLoading || hasActiveResearchTaskForCurrentSession || isGeneratingResponse) return;
 
     const rawInput = input;
     const trimmedInput = rawInput.trim();
@@ -787,18 +484,21 @@ export default function ChatInterface() {
     const messageText = shouldForceResearch ? commandState.topic : trimmedInput;
     if (!messageText) return;
 
-    let queuedResearch = false;
-    isGeneratingRef.current = true;
-    setIsGeneratingResponse(true);
     setComposerError('');
     closeCommandMenu();
 
     const pendingMessageId = `pending-${createClientMessageId()}`;
-    setMessages((prev) => [
-      ...prev,
-      { id: `user-${createClientMessageId()}`, text: messageText, sender: 'user' },
-      { id: pendingMessageId, text: '', sender: 'ai', status: 'pending' },
-    ]);
+    const userMessageId = `user-${createClientMessageId()}`;
+    const sendSessionKey = sessionIdRef.current || NEW_SESSION_KEY;
+
+    dispatch({
+      type: 'SEND_START',
+      sessionId: sendSessionKey,
+      userMessageId,
+      userText: messageText,
+      pendingMessageId,
+    });
+
     setInput('');
 
     if (!sessionTitle) {
@@ -806,92 +506,94 @@ export default function ChatInterface() {
     }
 
     try {
+      const activeSessionId = String(sessionIdRef.current || '').trim();
+      const requestBody = {
+        user_input: messageText,
+        force_research: shouldForceResearch,
+        model: chatSettings.model,
+        research_breadth: chatSettings.research_breadth,
+        research_depth: chatSettings.research_depth,
+        document_length: chatSettings.document_length,
+        ...(activeSessionId ? { session_id: activeSessionId } : {}),
+      };
+
       const payload = await apiRequest('/chat', {
         method: 'POST',
-        body: JSON.stringify({
-          user_input: messageText,
-          force_research: shouldForceResearch,
-          session_id: sessionIdRef.current,
-          model: chatSettings.model,
-          research_breadth: chatSettings.research_breadth,
-          research_depth: chatSettings.research_depth,
-          document_length: chatSettings.document_length,
-        }),
+        body: JSON.stringify(requestBody),
+        timeoutMs: 60_000,
       });
 
+      const responseKind = String(payload?.kind || '').trim().toLowerCase();
       const returnedSessionId = String(payload?.session_id || '').trim();
-      const researchId = String(payload?.research_id || '').trim();
-      const responseText = String(payload?.response || '').trim();
+      const researchId = String(payload?.task?.id || '').trim();
+      const responseText = String(payload?.message?.text || '').trim();
 
       if (returnedSessionId) {
         setSessionId(returnedSessionId);
         sessionIdRef.current = returnedSessionId;
       }
 
-      if (researchId) {
-        queuedResearch = true;
+      if (responseKind === 'task' && researchId) {
         const targetSessionId = returnedSessionId || sessionIdRef.current;
-        setActiveResearchTask({
-          researchId,
-          sessionId: targetSessionId,
-          status: 'queued',
-          pendingMessageId,
+        const normalizedPendingMessageId = pendingMessageId || getResearchPendingMessageId(researchId);
+        const progressText = String(payload?.task?.progress_message || 'Research started. This may take a few minutes.');
+
+        dispatch({
+          type: 'TASK_QUEUED',
+          sessionId: sendSessionKey,
+          pendingMessageId: normalizedPendingMessageId,
+          progressText,
         });
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === pendingMessageId
-              ? {
-                  ...message,
-                  text: 'Research started. This may take a few minutes.',
-                  sender: 'ai',
-                  status: 'pending',
-                }
-              : message
-          )
-        );
-        await loadSessions({ silent: true });
+
+        upsertSessionTask(targetSessionId, {
+          researchId,
+          status: payload?.task?.status,
+          pendingMessageId: normalizedPendingMessageId,
+          currentNode: payload?.task?.current_node,
+          progressMessage: payload?.task?.progress_message,
+        });
+
+        if (sessionIdRef.current === targetSessionId) {
+          ensurePendingResearchMessage(normalizedPendingMessageId);
+          dispatch({
+            type: 'TASK_PROGRESS',
+            sessionId: targetSessionId,
+            pendingMessageId: normalizedPendingMessageId,
+            progressText,
+          });
+        }
+
+        await refreshSessions({ silent: true });
         return;
       }
 
-      if (!responseText) {
+      if (responseKind !== 'message' || !responseText) {
         throw new Error('Empty response from backend');
       }
 
-      setMessages((prev) =>
-        prev.map((message) =>
-          message.id === pendingMessageId
-            ? { ...message, text: responseText, sender: 'ai', status: 'done' }
-            : message
-        )
-      );
-      await loadSessions({ silent: true });
+      dispatch({
+        type: 'SEND_SUCCESS',
+        sessionId: sendSessionKey,
+        pendingMessageId,
+        responseText,
+      });
+      await refreshSessions({ silent: true });
     } catch (error) {
       console.error('Error sending message:', error);
       const errorText = String(error?.message || "Sorry, I couldn't process your request.");
-      setMessages((prev) =>
-        prev.map((message) =>
-          message.id === pendingMessageId
-            ? {
-                ...message,
-                text: errorText,
-                sender: 'ai-error',
-                status: 'error',
-              }
-            : message
-        )
-      );
+      dispatch({
+        type: 'SEND_ERROR',
+        sessionId: sendSessionKey,
+        pendingMessageId,
+        errorText,
+      });
 
       const normalizedError = errorText.toLowerCase();
       if (
         sessionIdRef.current &&
         (normalizedError.includes('already running') || normalizedError.includes('already in progress'))
       ) {
-        await syncSessionTaskStatus(sessionIdRef.current);
-      }
-    } finally {
-      if (!queuedResearch) {
-        isGeneratingRef.current = false;
-        setIsGeneratingResponse(false);
+        await refreshActiveTaskForSession(sessionIdRef.current);
       }
     }
   };
@@ -923,7 +625,15 @@ export default function ChatInterface() {
         event.preventDefault();
         const selected = commandSuggestions[activeCommandIndex] || commandSuggestions[0];
         if (selected?.command) {
-          applyCommandSuggestion(selected.command);
+          const nextCursor = applyCommandSuggestion(selected.command, composerRef.current);
+          requestAnimationFrame(() => {
+            const target = composerRef.current;
+            if (!target) return;
+            target.focus();
+            if (typeof nextCursor === 'number') {
+              target.setSelectionRange(nextCursor, nextCursor);
+            }
+          });
         }
         return;
       }
@@ -956,10 +666,7 @@ export default function ChatInterface() {
       if (!targetSessionId) {
         throw new Error('No chat selected to share');
       }
-      await apiRequest(`/chat/sessions/${targetSessionId}/share`, {
-        method: 'POST',
-        body: JSON.stringify({ email: shareEmail.trim() }),
-      });
+      await shareSession(targetSessionId, shareEmail.trim(), shareCollaborative);
       closeShareModal();
     } catch (error) {
       console.error('Sharing error:', error);
@@ -969,154 +676,43 @@ export default function ChatInterface() {
     }
   };
 
-  const isEmptyResearchCommand = parseResearchCommand(input).isEmptyResearchCommand;
-  const composerHint = hasActiveResearchTask
-    ? 'A research task is in progress. Sending is disabled until it completes.'
+  const composerHint = hasActiveResearchTaskForCurrentSession
+    ? 'A research task is in progress for this session. Sending is disabled until it completes.'
     : isGeneratingResponse
       ? 'Wait for the current response to finish before sending another message.'
       : 'Enter to send. Shift+Enter for a new line.';
 
+  const sessionTaskStatusLabel = useMemo(() => {
+    if (!hasActiveResearchTaskForCurrentSession) return '';
+    const activeProgressMessage = String(activeSessionTask?.progressMessage || '').trim();
+    if (activeProgressMessage) return activeProgressMessage;
+    if (String(activeSessionTask?.status || '').toLowerCase() === 'queued') {
+      return 'Research queued';
+    }
+    return 'Research running';
+  }, [activeSessionTask?.progressMessage, activeSessionTask?.status, hasActiveResearchTaskForCurrentSession]);
+
   return (
-    <div className="relative flex h-screen overflow-hidden bg-gradient-to-b from-slate-50 via-blue-50/40 to-slate-100">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-24 right-0 h-72 w-72 rounded-full bg-blue-200/20 blur-3xl" />
-        <div className="absolute -left-16 bottom-10 h-64 w-64 rounded-full bg-blue-900/10 blur-3xl" />
-      </div>
-
-      <Transition appear show={isRenameModalOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-30" onClose={closeRenameModal}>
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-200"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-150"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" />
-          </Transition.Child>
-
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center p-4">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-200"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-150"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <Dialog.Panel className="w-full max-w-md overflow-hidden rounded-2xl border border-blue-100 bg-white p-6 shadow-xl">
-                  <Dialog.Title className="text-lg font-semibold text-blue-900">Rename Chat Session</Dialog.Title>
-
-                  <form onSubmit={handleRenameSubmit} className="mt-4 space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700">Chat Name</label>
-                      <input
-                        type="text"
-                        required
-                        value={renameValue}
-                        onChange={(event) => setRenameValue(event.target.value)}
-                        className="mt-1 block w-full rounded-lg border border-blue-100 px-3 py-2 text-sm shadow-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-                      />
-                    </div>
-
-                    {renameError && <p className="text-sm text-red-500">{renameError}</p>}
-
-                    <div className="flex justify-end gap-3">
-                      <button
-                        type="button"
-                        onClick={closeRenameModal}
-                        className="rounded-lg border border-blue-100 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={renameLoading || !renameValue.trim()}
-                        className="rounded-lg bg-blue-900 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50"
-                      >
-                        {renameLoading ? 'Renaming...' : 'Rename'}
-                      </button>
-                    </div>
-                  </form>
-                </Dialog.Panel>
-              </Transition.Child>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
-
-      <Transition appear show={isShareModalOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-30" onClose={closeShareModal}>
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-200"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-150"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" />
-          </Transition.Child>
-
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center p-4">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-200"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-150"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <Dialog.Panel className="w-full max-w-md overflow-hidden rounded-2xl border border-blue-100 bg-white p-6 shadow-xl">
-                  <Dialog.Title className="text-lg font-semibold text-blue-900">Share Chat Session</Dialog.Title>
-                  {shareSessionTitle && (
-                    <p className="mt-1 text-sm text-slate-500">Sharing: {shareSessionTitle}</p>
-                  )}
-
-                  <form onSubmit={handleShareSubmit} className="mt-4 space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700">Recipient Email</label>
-                      <input
-                        type="email"
-                        required
-                        value={shareEmail}
-                        onChange={(event) => setShareEmail(event.target.value)}
-                        className="mt-1 block w-full rounded-lg border border-blue-100 px-3 py-2 text-sm shadow-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-                      />
-                    </div>
-
-                    {shareError && <p className="text-sm text-red-500">{shareError}</p>}
-
-                    <div className="flex justify-end gap-3">
-                      <button
-                        type="button"
-                        onClick={closeShareModal}
-                        className="rounded-lg border border-blue-100 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={shareLoading || !shareEmail.trim()}
-                        className="rounded-lg bg-blue-900 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50"
-                      >
-                        {shareLoading ? 'Sharing...' : 'Share'}
-                      </button>
-                    </div>
-                  </form>
-                </Dialog.Panel>
-              </Transition.Child>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
+    <ChatLayout>
+      <ChatModals
+        isRenameModalOpen={isRenameModalOpen}
+        closeRenameModal={closeRenameModal}
+        handleRenameSubmit={handleRenameSubmit}
+        renameValue={renameValue}
+        setRenameValue={setRenameValue}
+        renameError={renameError}
+        renameLoading={renameLoading}
+        isShareModalOpen={isShareModalOpen}
+        closeShareModal={closeShareModal}
+        shareSessionTitle={shareSessionTitle}
+        handleShareSubmit={handleShareSubmit}
+        shareEmail={shareEmail}
+        setShareEmail={setShareEmail}
+        shareCollaborative={shareCollaborative}
+        setShareCollaborative={setShareCollaborative}
+        shareError={shareError}
+        shareLoading={shareLoading}
+      />
 
       <div
         id="mobile-chat-sidebar"
@@ -1143,6 +739,7 @@ export default function ChatInterface() {
             handleRenameChat={handleRenameChat}
             handleShareChat={handleShareChat}
             loadChat={loadChat}
+            taskBySession={taskBySession}
           />
         </div>
       </div>
@@ -1165,6 +762,7 @@ export default function ChatInterface() {
             handleRenameChat={handleRenameChat}
             handleShareChat={handleShareChat}
             loadChat={loadChat}
+            taskBySession={taskBySession}
           />
         )}
       </aside>
@@ -1227,7 +825,7 @@ export default function ChatInterface() {
               {showAgentActivity && (
                 <span className="hidden items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 md:inline-flex">
                   <span className="h-1.5 w-1.5 rounded-full bg-blue-700 animate-pulse" />
-                  {hasActiveResearchTask ? 'Research running' : 'Generating'}
+                  {hasActiveResearchTaskForCurrentSession ? sessionTaskStatusLabel : 'Generating'}
                 </span>
               )}
 
@@ -1243,77 +841,14 @@ export default function ChatInterface() {
           </div>
         </header>
 
-        <section ref={chatScrollContainerRef} className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-7">
-          <div className="mx-auto w-full max-w-5xl">
-            {chatLoading ? (
-              <div className="space-y-4">
-                {[1, 2, 3].map((item) => (
-                  <div key={item} className="animate-pulse rounded-2xl border border-blue-100 bg-white/90 p-4 shadow-sm">
-                    <div className="h-3 w-24 rounded bg-blue-100" />
-                    <div className="mt-3 h-2.5 w-full rounded bg-blue-50" />
-                    <div className="mt-2 h-2.5 w-5/6 rounded bg-blue-50" />
-                  </div>
-                ))}
-              </div>
-            ) : messages.length === 0 ? (
-              <div className="rounded-3xl border border-blue-100 bg-white/90 p-6 shadow-sm md:p-8">
-                <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-900 text-white">
-                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h8M8 14h5m7 5-4-4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8a4 4 0 0 1-1 2.646Z" />
-                  </svg>
-                </div>
-
-                <h3 className="mt-4 text-2xl font-semibold text-slate-900">What are we researching today?</h3>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                  Ask for market scans, comparative analyses, strategy notes, or deep-dive summaries. I will structure the output as a clean research response.
-                </p>
-
-                <div className="mt-6 grid gap-2">
-                  {QUICK_PROMPTS.map((prompt) => (
-                    <button
-                      key={prompt}
-                      type="button"
-                      onClick={() => setInput(prompt)}
-                      className="rounded-xl border border-blue-100 bg-blue-50/50 px-4 py-3 text-left text-sm text-slate-700 transition hover:border-blue-200 hover:bg-blue-50"
-                      disabled={isInteractionLocked}
-                    >
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="flex w-full flex-col gap-4">
-                {messages.map((msg, index) => {
-                  const isUser = msg.sender === 'user';
-                  const avatarClass = isUser ? 'bg-slate-900 text-white' : 'bg-blue-900 text-white';
-                  const avatarText = isUser ? 'You' : 'AI';
-
-                  return (
-                    <div
-                      key={msg.id || index}
-                      data-message-index={index}
-                      data-message-sender={msg.sender}
-                      className={`flex items-start gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}
-                    >
-                      {!isUser && (
-                        <div className={`mt-1 hidden h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold md:flex ${avatarClass}`}>
-                          {avatarText}
-                        </div>
-                      )}
-                      <MessageBubble msg={msg} />
-                      {isUser && (
-                        <div className={`mt-1 hidden h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold md:flex ${avatarClass}`}>
-                          {avatarText}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </section>
+        <MessageList
+          chatLoading={chatLoading}
+          messages={messages}
+          isInteractionLocked={isInteractionLocked}
+          quickPrompts={QUICK_PROMPTS}
+          onQuickPromptSelect={setInput}
+          chatScrollContainerRef={chatScrollContainerRef}
+        />
 
         <footer className="border-t border-blue-100/90 bg-white/80 px-4 py-4 backdrop-blur-md md:px-8 md:py-5">
           <form onSubmit={handleSend} className="mx-auto w-full max-w-5xl">
@@ -1452,7 +987,17 @@ export default function ChatInterface() {
                       <button
                         key={option.command}
                         type="button"
-                        onClick={() => applyCommandSuggestion(option.command)}
+                        onClick={() => {
+                          const nextCursor = applyCommandSuggestion(option.command, composerRef.current);
+                          requestAnimationFrame(() => {
+                            const target = composerRef.current;
+                            if (!target) return;
+                            target.focus();
+                            if (typeof nextCursor === 'number') {
+                              target.setSelectionRange(nextCursor, nextCursor);
+                            }
+                          });
+                        }}
                         className={`block w-full px-3 py-2 text-left transition ${
                           index === activeCommandIndex
                             ? 'bg-blue-50 text-blue-900'
@@ -1479,7 +1024,15 @@ export default function ChatInterface() {
 
               <div className="flex items-center justify-between px-2 pb-1 pt-2 text-[11px] text-slate-500">
                 <span>{composerHint}</span>
-                <span>{sessionId ? 'Session active' : 'New session'}</span>
+                <span>
+                  {sessionId
+                    ? hasOngoingTaskForSession(sessionId)
+                      ? 'Task active'
+                      : 'Session active'
+                    : hasAnyOngoingTask
+                      ? 'Background tasks active'
+                      : 'New session'}
+                </span>
               </div>
               {composerError && (
                 <p className="px-2 pb-1 text-xs text-red-600">{composerError}</p>
@@ -1488,6 +1041,6 @@ export default function ChatInterface() {
           </form>
         </footer>
       </main>
-    </div>
+    </ChatLayout>
   );
 }
