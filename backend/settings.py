@@ -101,6 +101,9 @@ class Settings:
     research_background_poll_interval_seconds: float
     research_background_batch_size: int
     research_background_max_retries: int
+    visual_repair_enabled: bool
+    visual_repair_max_retries: int
+    visual_repair_retry_timeout_seconds: float
 
     pdf_probe_timeout_seconds: float
     pdf_primary_timeout_seconds: float
@@ -163,6 +166,12 @@ def get_settings() -> Settings:
         ),
         research_background_batch_size=_env_int("RESEARCH_BACKGROUND_BATCH_SIZE", 8),
         research_background_max_retries=_env_int("RESEARCH_BACKGROUND_MAX_RETRIES", 2),
+        visual_repair_enabled=_env_bool("VISUAL_REPAIR_ENABLED", True),
+        visual_repair_max_retries=_env_int("VISUAL_REPAIR_MAX_RETRIES", 2),
+        visual_repair_retry_timeout_seconds=_env_float(
+            "VISUAL_REPAIR_RETRY_TIMEOUT_SECONDS",
+            120.0,
+        ),
         pdf_probe_timeout_seconds=_env_float("PDF_PROBE_TIMEOUT_SECONDS", 2.5),
         pdf_primary_timeout_seconds=_env_float("PDF_PRIMARY_TIMEOUT_SECONDS", 30.0),
         pdf_in_memory_timeout_seconds=_env_float("PDF_IN_MEMORY_TIMEOUT_SECONDS", 180.0),
