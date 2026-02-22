@@ -282,3 +282,34 @@ Escalation and safety:
                 f"{research_idea}"
             )
         )
+
+    def repair_section_visualizations_prompt(
+        self,
+        section_content: str,
+        invalid_report: str,
+    ) -> list[AnyMessage]:
+        return [
+            SystemMessage(
+                content=(
+                    "You are fixing only invalid visualization fenced blocks in a markdown section. "
+                    "Rules: "
+                    "1) Edit only visualization blocks reported as invalid; keep all non-visual text unchanged. "
+                    "2) Supported fenced blocks: ```chartjson``` and ```mermaid```. "
+                    "3) chartjson must be strict JSON with top-level object: "
+                    '{ "title": string?, "caption": string?, "option": { ... } }. '
+                    "No comments, no JS functions, no trailing commas. "
+                    "4) Mermaid labels must be quoted as nodeId[\"Label\"] when labels include punctuation, "
+                    "slashes, ampersands, parentheses, unicode, or special symbols. "
+                    "5) If a block cannot be confidently fixed, remove only that invalid fenced block. "
+                    "6) Return the full corrected section markdown only. No explanations."
+                )
+            ),
+            HumanMessage(
+                content=(
+                    "Invalid visualization report:\n"
+                    f"{invalid_report}\n\n"
+                    "Section content to repair:\n"
+                    f"{section_content}"
+                )
+            ),
+        ]
