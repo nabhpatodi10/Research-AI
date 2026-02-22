@@ -12,6 +12,7 @@ from playwright.async_api import Browser
 
 from database import Database
 from nodes import Nodes
+from settings import get_settings
 from structures import CompleteDocument, ContentSection, Outline, Perspectives
 from tools import Tools
 
@@ -24,6 +25,12 @@ from .helpers import (
     message_text,
 )
 from .schema import graphSchema
+from .visualizations import (
+    SectionValidationReport,
+    drop_invalid_blocks,
+    format_invalid_visual_report,
+    validate_section_visualizations,
+)
 
 
 class ResearchGraph:
@@ -46,6 +53,7 @@ class ResearchGraph:
         progress_callback: Any = None,
     ):
         self.__node = Nodes()
+        settings = get_settings()
         gpt_model_name = "gpt-5-nano" if model_tier == "mini" else "gpt-5-mini"
         self.__gemini_model = (
             ChatGoogleGenerativeAI(model="gemini-3-flash-preview", thinking_level="high")
@@ -73,6 +81,12 @@ class ResearchGraph:
         )
         self.__section_attempt_timeout_seconds = 900.0
         self.__section_retry_delays = (0.5, 1.0)
+        self.__visual_repair_enabled = bool(settings.visual_repair_enabled)
+        self.__visual_repair_max_retries = max(0, int(settings.visual_repair_max_retries))
+        self.__visual_repair_retry_timeout_seconds = max(
+            1.0,
+            float(settings.visual_repair_retry_timeout_seconds),
+        )
         self.__tools = Tools(
             session_id=session_id,
             database=database,
@@ -440,6 +454,86 @@ class ResearchGraph:
 
         return await self.__final_content_model.with_structured_output(ContentSection).ainvoke(messages)
 
+    def __validate_section_visualizations(self, content: str) -> SectionValidationReport:
+        return validate_section_visualizations(content)
+
+    def __drop_invalid_visualizations(self, section: ContentSection) -> ContentSection:
+        report = self.__validate_section_visualizations(section.content)
+        if not report.invalid_blocks:
+            return section
+
+        cleaned_content = drop_invalid_blocks(section.content, report.invalid_blocks)
+        return ContentSection(
+            section_title=section.section_title,
+            content=cleaned_content,
+            citations=list(section.citations or []),
+        )
+
+    async def __repair_section_visualizations(self, section: ContentSection) -> ContentSection:
+        if not self.__visual_repair_enabled:
+            return self.__drop_invalid_visualizations(section)
+
+        working_content = str(section.content or "")
+        citations = list(section.citations or [])
+        section_title = str(section.section_title or "").strip() or "Untitled Section"
+        attempt_count = self.__visual_repair_max_retries + 1
+
+        for attempt in range(1, attempt_count + 1):
+            report = self.__validate_section_visualizations(working_content)
+            if not report.invalid_blocks:
+                return ContentSection(
+                    section_title=section_title,
+                    content=working_content,
+                    citations=citations,
+                )
+
+            if attempt >= attempt_count:
+                cleaned_content = drop_invalid_blocks(working_content, report.invalid_blocks)
+                return ContentSection(
+                    section_title=section_title,
+                    content=cleaned_content,
+                    citations=citations,
+                )
+
+            repair_prompt = self.__node.repair_section_visualizations_prompt(
+                section_content=working_content,
+                invalid_report=format_invalid_visual_report(report),
+            )
+            try:
+                repaired_message = await asyncio.wait_for(
+                    self.__summary_model.ainvoke(repair_prompt),
+                    timeout=self.__visual_repair_retry_timeout_seconds,
+                )
+                repaired_text = message_text(repaired_message).strip()
+                if repaired_text:
+                    working_content = repaired_text
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                print(
+                    f"[graph] Visualization repair attempt {attempt}/{attempt_count} "
+                    f"failed for section '{section_title}': {error}"
+                )
+
+        # Defensive fallback; loop should always return.
+        return self.__drop_invalid_visualizations(section)
+
+    async def __resolve_repair_task(
+        self,
+        task: asyncio.Task[ContentSection],
+        fallback_section: ContentSection,
+    ) -> ContentSection:
+        try:
+            return await task
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            print(
+                f"[graph] Visualization repair task crashed for section "
+                f"'{fallback_section.section_title}': {error}. Applying safe fallback."
+            )
+            return self.__drop_invalid_visualizations(fallback_section)
+
     async def __generate_document_outline(self, state: graphSchema):
         await self.__emit_progress("generate_document_outline")
         agent = create_agent(
@@ -573,8 +667,12 @@ class ResearchGraph:
         if self.__research_breadth == "low":
             return {"final_document": self.__build_low_breadth_document(state)}
 
-        final_sections: list[ContentSection] = []
+        generated_sections: list[ContentSection] = []
+        repaired_sections: list[ContentSection | None] = []
         summary = None
+        pending_repair_task: asyncio.Task[ContentSection] | None = None
+        pending_repair_index: int | None = None
+
         for section_content in state["perspective_content"]:
             if len(section_content) == 0:
                 continue
@@ -583,12 +681,36 @@ class ResearchGraph:
                 outline_str=state["document_outline"].as_str,
                 summary=summary,
             )
-            final_sections.append(final_section)
+            generated_sections.append(final_section)
+            repaired_sections.append(None)
+
+            # One-step pipeline:
+            # While this section was being generated, previous section repair runs in background.
+            if pending_repair_task is not None and pending_repair_index is not None:
+                repaired_sections[pending_repair_index] = await self.__resolve_repair_task(
+                    pending_repair_task,
+                    generated_sections[pending_repair_index],
+                )
+
+            pending_repair_index = len(generated_sections) - 1
+            pending_repair_task = asyncio.create_task(
+                self.__repair_section_visualizations(final_section)
+            )
+
             summary_message = await self.__summary_model.ainvoke(
-                self.__node.generate_rolling_summary("\n".join([section.as_str for section in final_sections]))
+                self.__node.generate_rolling_summary(
+                    "\n".join([section.as_str for section in generated_sections])
+                )
             )
             summary = message_text(summary_message)
 
+        if pending_repair_task is not None and pending_repair_index is not None:
+            repaired_sections[pending_repair_index] = await self.__resolve_repair_task(
+                pending_repair_task,
+                generated_sections[pending_repair_index],
+            )
+
+        final_sections = [section for section in repaired_sections if section is not None]
         final_document = CompleteDocument(
             title=state["document_outline"].document_title,
             sections=final_sections,
