@@ -11,7 +11,7 @@ from database import Database
 from nodes import Nodes
 from pdf_processing_modules.helpers import extract_pdf_text_from_bytes
 from pdf_processing_modules.models import PdfProcessResult
-from settings import get_settings
+from settings import build_langsmith_thread_config, get_settings
 
 
 class PdfProcessingService:
@@ -26,6 +26,7 @@ class PdfProcessingService:
     ):
         settings = get_settings()
         self._session_id = session_id
+        self._thread_config = build_langsmith_thread_config(session_id)
         self._database = database
         self._probe_timeout_seconds = settings.pdf_probe_timeout_seconds
         self._primary_timeout_seconds = settings.pdf_primary_timeout_seconds
@@ -159,6 +160,7 @@ class PdfProcessingService:
         timed_out = False
         stream = self._primary_model.astream(
             [HumanMessage(content=prompt)],
+            config=self._thread_config,
             tools=[{"url_context": {}}],
             tool_choice="required",
         )
