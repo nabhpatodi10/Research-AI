@@ -74,7 +74,7 @@ async (diagram) => {
       // parse() was previously called before render(), but it is stricter than render() and
       // rejects diagrams that render() handles gracefully. Using render() as the sole test
       // matches the actual frontend behaviour.
-      const isParseError = /parse\s+error|syntax\s+error|unrecognized|invalid\s+diagram|lexer|token/i.test(message);
+      const isParseError = /parse\\s+error|syntax\\s+error|unrecognized|invalid\\s+diagram|lexer|token/i.test(message);
       if (isParseError) {
         return { status: "invalid", reason: message };
       }
@@ -145,6 +145,39 @@ async (option) => {
 """
 
 
+_KATEX_PROBE_SCRIPT = """
+async (args) => {
+  try {
+    const { expression, displayMode } = args;
+    const katex = globalThis.katex;
+    if (!katex || typeof katex.renderToString !== "function") {
+      return { status: "unavailable", reason: "KaTeX runtime not available in probe page." };
+    }
+    try {
+      katex.renderToString(expression, {
+        displayMode: !!displayMode,
+        throwOnError: true,
+        strict: "error",
+      });
+      return { status: "valid" };
+    } catch (err) {
+      const name = (err && err.constructor) ? (err.constructor.name || "") : "";
+      const message = (err && err.message) ? String(err.message) : String(err);
+      // KaTeX throws ParseError for invalid math expressions.
+      // Other exceptions (DOM fault, JS runtime error) are infrastructure failures.
+      if (name === "ParseError" || /ParseError|parse error|undefined control sequence|Expected '|Missing|Extra /i.test(message)) {
+        return { status: "invalid", reason: message };
+      }
+      return { status: "unavailable", reason: message };
+    }
+  } catch (topErr) {
+    const message = (topErr && topErr.message) ? String(topErr.message) : String(topErr);
+    return { status: "unavailable", reason: message };
+  }
+}
+"""
+
+
 class PlaywrightVisualTier2Validator:
     _asset_cache: ClassVar[dict[str, str]] = {}
     _asset_cache_lock: ClassVar[asyncio.Lock] = asyncio.Lock()
@@ -171,6 +204,8 @@ class PlaywrightVisualTier2Validator:
         self._base_dir = Path(__file__).resolve().parent.parent
         self._mermaid_asset_path = self._resolve_asset_path(settings.visual_tier2_mermaid_asset_path)
         self._echarts_asset_path = self._resolve_asset_path(settings.visual_tier2_echarts_asset_path)
+        self._katex_asset_path = self._resolve_asset_path(settings.visual_tier2_katex_asset_path)
+        self._equation_max_chars = max(64, int(settings.visual_tier2_equation_max_chars))
 
     @staticmethod
     def _short_reason(reason: str | None, limit: int = 220) -> str | None:
@@ -326,6 +361,37 @@ class PlaywrightVisualTier2Validator:
             asset_source=asset_source,
             evaluate_script=_MERMAID_PROBE_SCRIPT,
             evaluate_arg=source,
+        )
+
+    async def validate_equation(self, expression: str, *, display_mode: bool) -> tuple[str, str | None]:
+        if not self._enabled:
+            return ("unavailable", "Tier-2 validation is disabled.")
+
+        expr = str(expression or "").strip()
+        if not expr:
+            return ("invalid", "Empty equation expression.")
+
+        expr_chars = len(expr)
+        if expr_chars > self._equation_max_chars:
+            return (
+                "unavailable",
+                (
+                    "Equation expression exceeds Tier-2 size limit "
+                    f"({expr_chars} chars > {self._equation_max_chars} chars)."
+                ),
+            )
+
+        asset_source = await self._load_asset(self._katex_asset_path)
+        if not asset_source:
+            return (
+                "unavailable",
+                f"KaTeX asset could not be loaded from {self._katex_asset_path}.",
+            )
+
+        return await self._run_with_session_limit(
+            asset_source=asset_source,
+            evaluate_script=_KATEX_PROBE_SCRIPT,
+            evaluate_arg={"expression": expr, "displayMode": bool(display_mode)},
         )
 
     async def validate_chartjson_option(self, option: dict[str, Any]) -> tuple[str, str | None]:

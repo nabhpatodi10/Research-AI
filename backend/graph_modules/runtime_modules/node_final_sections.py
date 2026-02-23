@@ -16,6 +16,7 @@ async def run_final_section_generation(
     build_low_breadth_document: Any,
     generate_final_section: Any,
     repair_section_visualizations: Any,
+    repair_section_equations: Any,
     resolve_repair_task: Any,
     summary_model: Any,
     node_builder: Any,
@@ -43,10 +44,11 @@ async def run_final_section_generation(
         repaired_sections.append(None)
 
         if pending_repair_task is not None and pending_repair_index is not None:
-            repaired_sections[pending_repair_index] = await resolve_repair_task(
+            viz_repaired = await resolve_repair_task(
                 pending_repair_task,
                 generated_sections[pending_repair_index],
             )
+            repaired_sections[pending_repair_index] = await repair_section_equations(viz_repaired)
 
         pending_repair_index = len(generated_sections) - 1
         pending_repair_task = asyncio.create_task(repair_section_visualizations(final_section))
@@ -60,10 +62,11 @@ async def run_final_section_generation(
         summary = message_text(summary_message)
 
     if pending_repair_task is not None and pending_repair_index is not None:
-        repaired_sections[pending_repair_index] = await resolve_repair_task(
+        viz_repaired = await resolve_repair_task(
             pending_repair_task,
             generated_sections[pending_repair_index],
         )
+        repaired_sections[pending_repair_index] = await repair_section_equations(viz_repaired)
 
     final_sections = [section for section in repaired_sections if section is not None]
     final_document = CompleteDocument(

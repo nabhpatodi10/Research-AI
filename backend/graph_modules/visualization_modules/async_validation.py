@@ -5,9 +5,16 @@ import json
 from typing import TYPE_CHECKING
 
 from .chartjson import validate_chartjson
+from .equation import validate_equation as _validate_equation_tier1
 from .extract import extract_visual_blocks
 from .mermaid import validate_mermaid
-from .types import InvalidVisualBlock, SectionValidationReport, ValidationResult, VisualBlock
+from .types import (
+    EquationSpan,
+    InvalidVisualBlock,
+    SectionValidationReport,
+    ValidationResult,
+    VisualBlock,
+)
 
 
 if TYPE_CHECKING:
@@ -161,3 +168,40 @@ async def validate_section_visualizations_async(
             )
 
     return SectionValidationReport(blocks=blocks, invalid_blocks=invalid)
+
+
+async def validate_equation_async(
+    span: EquationSpan,
+    *,
+    tier2_validator: "PlaywrightVisualTier2Validator | None" = None,
+    tier2_enabled: bool = False,
+    tier2_fail_open: bool = True,
+    equation_max_chars: int = 4096,
+) -> ValidationResult:
+    """Validate a single :class:`EquationSpan` using Tier-1 (structural) checks
+    and optionally Tier-2 (KaTeX browser probe).
+    """
+    primary_result = _validate_equation_tier1(span, max_chars=equation_max_chars)
+    if not primary_result.is_valid:
+        return primary_result
+
+    if not tier2_enabled or tier2_validator is None:
+        return primary_result
+
+    display_mode = span.delimiter_style in ("block_dollar", "block_bracket")
+    status, reason = await tier2_validator.validate_equation(
+        span.expression, display_mode=display_mode
+    )
+
+    if status == "valid":
+        return primary_result
+
+    if status == "invalid":
+        return ValidationResult(False, reason or "Equation failed Tier-2 KaTeX validation.")
+
+    if tier2_fail_open:
+        return primary_result
+    return ValidationResult(
+        False,
+        reason or "KaTeX Tier-2 validator is unavailable.",
+    )
