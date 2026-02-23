@@ -1,4 +1,5 @@
 from .callbacks import emit_progress, emit_state_checkpoint
+from .equation_repair import repair_section_equations, resolve_equation_repair_task
 from .node_final_sections import run_final_section_generation
 from .node_outline import run_generate_document_outline
 from .node_perspective_content import run_generate_content_for_perspectives
@@ -26,7 +27,9 @@ __all__ = [
     "emit_state_checkpoint",
     "generate_final_section",
     "next_node_after",
+    "repair_section_equations",
     "repair_section_visualizations",
+    "resolve_equation_repair_task",
     "resolve_resume_node",
     "resolve_repair_task",
     "run_expert_pipeline",
