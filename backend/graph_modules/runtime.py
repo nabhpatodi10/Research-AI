@@ -29,6 +29,7 @@ from .runtime_modules.state_codec import (
     serialize_graph_state,
 )
 from .runtime_modules.visual_repair import repair_section_visualizations, resolve_repair_task
+from .runtime_modules.equation_repair import repair_section_equations
 from .schema import graphSchema
 from .visual_tier2 import PlaywrightVisualTier2Validator
 
@@ -94,6 +95,8 @@ class ResearchGraph:
             session_id=session_id,
             browser=browser,
         )
+        self.__equation_repair_max_retries = max(0, int(settings.equation_repair_max_retries))
+        self.__equation_max_chars = max(64, int(settings.visual_tier2_equation_max_chars))
         self.__thread_config = build_langsmith_thread_config(session_id)
         self.__tools = Tools(
             session_id=session_id,
@@ -238,6 +241,20 @@ class ResearchGraph:
             run_config=self.__thread_config,
         )
 
+    async def __repair_section_equations(self, section):
+        return await repair_section_equations(
+            section,
+            equation_repair_max_retries=self.__equation_repair_max_retries,
+            equation_repair_retry_timeout_seconds=self.__visual_repair_retry_timeout_seconds,
+            model=self.__final_content_model,
+            node_builder=self.__node,
+            tier2_validator=self.__visual_tier2_validator,
+            tier2_enabled=self.__visual_tier2_enabled,
+            tier2_fail_open=self.__visual_tier2_fail_open,
+            equation_max_chars=self.__equation_max_chars,
+            run_config=self.__thread_config,
+        )
+
     async def __resolve_repair_task(self, task, fallback_section):
         return await resolve_repair_task(
             task,
@@ -289,6 +306,7 @@ class ResearchGraph:
             build_low_breadth_document=self.__build_low_breadth_document,
             generate_final_section=self.__generate_final_section,
             repair_section_visualizations=self.__repair_section_visualizations,
+            repair_section_equations=self.__repair_section_equations,
             resolve_repair_task=self.__resolve_repair_task,
             summary_model=self.__summary_model,
             node_builder=self.__node,
