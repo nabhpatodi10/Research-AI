@@ -1,4 +1,5 @@
 import asyncio
+from typing import Any
 
 from langchain.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -9,7 +10,11 @@ from nodes import Nodes
 from .helpers import message_role, message_text
 
 
-async def summarize_older_messages(messages: list[BaseMessage], model: BaseChatModel) -> AIMessage | None:
+async def summarize_older_messages(
+    messages: list[BaseMessage],
+    model: BaseChatModel,
+    run_config: dict[str, Any] | None = None,
+) -> AIMessage | None:
     if not messages:
         return None
 
@@ -30,7 +35,10 @@ async def summarize_older_messages(messages: list[BaseMessage], model: BaseChatM
         return None
 
     try:
-        summary_response = await model.ainvoke(Nodes().generate_conversation_summary(transcript_lines))
+        summary_response = await model.ainvoke(
+            Nodes().generate_conversation_summary(transcript_lines),
+            config=run_config,
+        )
         summary_text = message_text(summary_response)
     except Exception:
         summary_text = "\n".join(transcript_lines[-12:])
@@ -41,7 +49,12 @@ async def summarize_older_messages(messages: list[BaseMessage], model: BaseChatM
     return AIMessage(content=f"Summary of earlier conversation before latest 5 turns:\n{summary_text}")
 
 
-async def get_chat_history(database: Database, session_id: str, model: BaseChatModel) -> list[BaseMessage]:
+async def get_chat_history(
+    database: Database,
+    session_id: str,
+    model: BaseChatModel,
+    run_config: dict[str, Any] | None = None,
+) -> list[BaseMessage]:
     previous_messages = await database.get_messages(session_id)
     recent_history: list[BaseMessage] = []
     older_history: list[BaseMessage] = []
@@ -63,7 +76,7 @@ async def get_chat_history(database: Database, session_id: str, model: BaseChatM
         if idx % 100 == 0:
             await asyncio.sleep(0)
 
-    summary_message = await summarize_older_messages(older_history, model)
+    summary_message = await summarize_older_messages(older_history, model, run_config=run_config)
     if summary_message is not None:
         return [summary_message, *recent_history]
     return recent_history
@@ -74,8 +87,9 @@ async def build_research_handoff_context(
     session_id: str,
     model: BaseChatModel,
     additional_user_context: str | None = None,
+    run_config: dict[str, Any] | None = None,
 ) -> str:
-    history = await get_chat_history(database, session_id, model)
+    history = await get_chat_history(database, session_id, model, run_config=run_config)
     transcript_lines: list[str] = []
     for message in history:
         if not isinstance(message, (HumanMessage, AIMessage, ToolMessage)):
@@ -94,7 +108,7 @@ async def build_research_handoff_context(
 
     summarize_prompt: list[BaseMessage] = Nodes().generate_research_handoff_brief(transcript_lines)
     try:
-        summary_response = await model.ainvoke(summarize_prompt)
+        summary_response = await model.ainvoke(summarize_prompt, config=run_config)
         summary_text = message_text(summary_response).strip()
         if summary_text:
             return summary_text

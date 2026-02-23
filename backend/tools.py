@@ -10,7 +10,7 @@ from scrape import Scrape
 from database import Database
 from nodes import Nodes
 from pdf_processing import PdfProcessingService
-from settings import get_settings
+from settings import build_langsmith_thread_config, get_settings
 
 class Tools:
 
@@ -25,6 +25,7 @@ class Tools:
         self.__search = CustomSearch()
         self.__database = database
         self.__session_id = session_id
+        self.__thread_config = build_langsmith_thread_config(session_id)
         self.__model = ChatGoogleGenerativeAI(model = "models/gemini-flash-lite-latest")
         self.__nodes = Nodes()
         self.__pdf_processor = PdfProcessingService(
@@ -89,7 +90,8 @@ class Tools:
             return document.page_content
         try:
             summary = await self.__model.ainvoke(
-                self.__nodes.generate_rolling_summary(document.page_content)
+                self.__nodes.generate_rolling_summary(document.page_content),
+                config=self.__thread_config,
             )
         except Exception:
             return None

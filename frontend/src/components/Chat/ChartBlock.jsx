@@ -93,6 +93,25 @@ function normalizeLegacyChartPayload(payload) {
   return normalized;
 }
 
+function decodeEscapedChartSpec(rawValue) {
+  const raw = String(rawValue ?? '').trim();
+  const escapedNewlineMatches = raw.match(/\\r\\n|\\n|\\r/g) || [];
+  const realNewlineMatches = raw.match(/\r\n|\n|\r/g) || [];
+  const escapedNewlineCount = escapedNewlineMatches.length;
+  const realNewlineCount = realNewlineMatches.length;
+
+  if (escapedNewlineCount < 2 || escapedNewlineCount <= realNewlineCount) {
+    return raw;
+  }
+  return raw
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\n')
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, '\\')
+    .trim();
+}
+
 function validateChartPayload(payload) {
   if (!isPlainObject(payload)) {
     return 'Chart payload must be a JSON object.';
@@ -136,11 +155,33 @@ function parseChartSpec(specSource) {
     }
     return { raw, payload };
   } catch {
-    return {
-      raw,
-      error: 'Invalid JSON in chartjson block.',
-    };
+    const normalizedRaw = decodeEscapedChartSpec(raw);
+    if (normalizedRaw && normalizedRaw !== raw) {
+      try {
+        const parsedPayload = JSON.parse(normalizedRaw);
+        const payload = normalizeLegacyChartPayload(parsedPayload);
+        const validationError = validateChartPayload(payload);
+        if (validationError) {
+          return { raw: normalizedRaw, error: validationError };
+        }
+        return { raw: normalizedRaw, payload };
+      } catch {
+        // Fall through to the standard error payload below.
+      }
+    }
+
+    return { raw, error: 'Invalid JSON in chartjson block.' };
   }
+}
+
+function renderChartError(message, rawContent) {
+  return (
+    <div className="ra-visual-block ra-visual-error" role="alert">
+      <p className="ra-visual-error-title">Chart could not be rendered</p>
+      <p className="ra-visual-error-message">{message}</p>
+      {rawContent ? <pre className="ra-visual-fallback-pre">{rawContent}</pre> : null}
+    </div>
+  );
 }
 
 export default function ChartBlock({ specSource, chartId }) {
@@ -223,10 +264,10 @@ export default function ChartBlock({ specSource, chartId }) {
   }, [parsed.error, chartId, didEmitValidationError]);
 
   if (parsed.error) {
-    return null;
+    return renderChartError(parsed.error, parsed.raw || String(specSource ?? '').trim());
   }
   if (loadError) {
-    return null;
+    return renderChartError(loadError, parsed.raw || String(specSource ?? '').trim());
   }
 
   const payload = parsed.payload;

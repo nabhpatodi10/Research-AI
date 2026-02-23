@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -104,6 +105,14 @@ class Settings:
     visual_repair_enabled: bool
     visual_repair_max_retries: int
     visual_repair_retry_timeout_seconds: float
+    visual_tier2_enabled: bool
+    visual_tier2_timeout_seconds: float
+    visual_tier2_fail_open: bool
+    visual_tier2_concurrency_per_session: int
+    visual_tier2_mermaid_max_bytes: int
+    visual_tier2_chart_max_bytes: int
+    visual_tier2_mermaid_asset_path: str
+    visual_tier2_echarts_asset_path: str
 
     pdf_probe_timeout_seconds: float
     pdf_primary_timeout_seconds: float
@@ -172,6 +181,20 @@ def get_settings() -> Settings:
             "VISUAL_REPAIR_RETRY_TIMEOUT_SECONDS",
             120.0,
         ),
+        visual_tier2_enabled=_env_bool("VISUAL_TIER2_ENABLED", True),
+        visual_tier2_timeout_seconds=_env_float("VISUAL_TIER2_TIMEOUT_SECONDS", 4.0),
+        visual_tier2_fail_open=_env_bool("VISUAL_TIER2_FAIL_OPEN", True),
+        visual_tier2_concurrency_per_session=_env_int("VISUAL_TIER2_CONCURRENCY_PER_SESSION", 2),
+        visual_tier2_mermaid_max_bytes=_env_int("VISUAL_TIER2_MERMAID_MAX_BYTES", 30_000),
+        visual_tier2_chart_max_bytes=_env_int("VISUAL_TIER2_CHART_MAX_BYTES", 30_000),
+        visual_tier2_mermaid_asset_path=_env_str(
+            "VISUAL_TIER2_MERMAID_ASSET_PATH",
+            "static/vendor/mermaid.min.js",
+        ),
+        visual_tier2_echarts_asset_path=_env_str(
+            "VISUAL_TIER2_ECHARTS_ASSET_PATH",
+            "static/vendor/echarts.min.js",
+        ),
         pdf_probe_timeout_seconds=_env_float("PDF_PROBE_TIMEOUT_SECONDS", 2.5),
         pdf_primary_timeout_seconds=_env_float("PDF_PRIMARY_TIMEOUT_SECONDS", 30.0),
         pdf_in_memory_timeout_seconds=_env_float("PDF_IN_MEMORY_TIMEOUT_SECONDS", 180.0),
@@ -190,3 +213,16 @@ def validate_security_settings(settings: Settings) -> None:
         raise RuntimeError("APP_SESSION_SECRET must be set and at least 32 characters.")
     if settings.session_ttl_seconds < 300 or settings.session_ttl_seconds > 2_592_000:
         raise RuntimeError("APP_SESSION_TTL_SECONDS must be between 300 and 2592000 seconds.")
+
+
+def build_langsmith_thread_config(
+    session_id: str | None,
+    base_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    config: dict[str, Any] = dict(base_config or {})
+    metadata = dict(config.get("metadata") or {})
+    normalized_session_id = str(session_id or "").strip()
+    if normalized_session_id:
+        metadata["thread_id"] = normalized_session_id
+    config["metadata"] = metadata
+    return config

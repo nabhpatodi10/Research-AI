@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from agent import build_research_handoff_context
 from nodes import Nodes
 from research_progress import normalize_research_node
+from settings import build_langsmith_thread_config
 
 
 RESEARCH_COMMAND_PATTERN = re.compile(r"^\s*/research(?:\s+(?P<topic>[\s\S]*))?$", re.IGNORECASE)
@@ -57,6 +58,7 @@ async def maybe_auto_research_handoff_payload(
     session_id: str,
     user_input: str,
 ) -> str | None:
+    thread_config = build_langsmith_thread_config(session_id)
     trimmed = str(user_input or "").strip()
     if not looks_like_auto_research_candidate(trimmed):
         return None
@@ -66,7 +68,7 @@ async def maybe_auto_research_handoff_payload(
     try:
         decision = await request.app.state.chat_model_mini.with_structured_output(
             AutoResearchDecision
-        ).ainvoke(decision_messages)
+        ).ainvoke(decision_messages, config=thread_config)
     except Exception:
         return None
 
@@ -82,6 +84,7 @@ async def maybe_auto_research_handoff_payload(
         session_id=session_id,
         model=request.app.state.chat_model,
         additional_user_context=trimmed,
+        run_config=thread_config,
     )
     return handoff_context or trimmed
 

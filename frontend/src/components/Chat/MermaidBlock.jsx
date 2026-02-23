@@ -29,7 +29,22 @@ function hashString(value) {
 
 async function loadMermaid() {
   if (!mermaidPromise) {
-    mermaidPromise = import('mermaid').then((mod) => mod.default || mod);
+    mermaidPromise = import('mermaid')
+      .then((module) => {
+        const mermaid = module?.default || module;
+        if (
+          !mermaid ||
+          typeof mermaid.initialize !== 'function' ||
+          typeof mermaid.render !== 'function'
+        ) {
+          throw new Error('Mermaid renderer loaded with an invalid interface.');
+        }
+        return mermaid;
+      })
+      .catch((error) => {
+        mermaidPromise = null;
+        throw error;
+      });
   }
   return mermaidPromise;
 }
@@ -43,6 +58,90 @@ function validateMermaidSource(definition) {
   return '';
 }
 
+function normalizeEscapedDefinition(value) {
+  const raw = String(value ?? '').trim();
+  const escapedNewlineMatches = raw.match(/\\r\\n|\\n|\\r/g) || [];
+  const realNewlineMatches = raw.match(/\r\n|\n|\r/g) || [];
+  const escapedNewlineCount = escapedNewlineMatches.length;
+  const realNewlineCount = realNewlineMatches.length;
+
+  if (escapedNewlineCount < 2 || escapedNewlineCount <= realNewlineCount) {
+    return raw;
+  }
+
+  return raw
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\n')
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, '\\')
+    .trim();
+}
+
+/**
+ * Replace literal newlines that appear inside double-quoted label strings with
+ * mermaid's <br/> marker.  A real newline in a quoted label terminates the
+ * lexer token and causes a parse error; <br/> is the correct multiline syntax.
+ */
+function repairLabelNewlines(source) {
+  const raw = String(source ?? '');
+  if (!raw.includes('\n') && !raw.includes('\r')) return raw;
+
+  let result = '';
+  let inDoubleQuote = false;
+  let escaped = false;
+
+  for (let index = 0; index < raw.length; index += 1) {
+    const ch = raw[index];
+
+    if (escaped) {
+      escaped = false;
+      result += ch;
+      continue;
+    }
+
+    if (ch === '\\') {
+      escaped = true;
+      result += ch;
+      continue;
+    }
+
+    if (ch === '"') {
+      inDoubleQuote = !inDoubleQuote;
+      result += ch;
+      continue;
+    }
+
+    if (inDoubleQuote && (ch === '\n' || ch === '\r')) {
+      // Absorb the \n in a \r\n pair so we only emit one <br/>.
+      if (ch === '\r' && raw[index + 1] === '\n') continue;
+      result += '<br/>';
+      continue;
+    }
+
+    result += ch;
+  }
+
+  return result;
+}
+
+function renderMermaidError(message, rawContent) {
+  return (
+    <div className="ra-visual-block ra-visual-error" role="alert">
+      <p className="ra-visual-error-title">Diagram could not be rendered</p>
+      <p className="ra-visual-error-message">{message}</p>
+      {rawContent ? <pre className="ra-visual-fallback-pre">{rawContent}</pre> : null}
+    </div>
+  );
+}
+
+function extractRenderedSvg(result) {
+  if (!result) return '';
+  if (typeof result === 'string') return result.trim();
+  if (typeof result.svg === 'string') return result.svg.trim();
+  return '';
+}
+
 export default function MermaidBlock({ definition, diagramId }) {
   const containerRef = useRef(null);
   const [isVisible, setIsVisible] = useState(false);
@@ -51,7 +150,10 @@ export default function MermaidBlock({ definition, diagramId }) {
   const [isRendering, setIsRendering] = useState(false);
   const [didEmitSuccess, setDidEmitSuccess] = useState(false);
   const [didEmitValidationError, setDidEmitValidationError] = useState(false);
-  const normalizedDefinition = useMemo(() => String(definition ?? '').trim(), [definition]);
+  const normalizedDefinition = useMemo(
+    () => repairLabelNewlines(normalizeEscapedDefinition(definition)),
+    [definition]
+  );
   const validationError = useMemo(
     () => validateMermaidSource(normalizedDefinition),
     [normalizedDefinition]
@@ -74,6 +176,7 @@ export default function MermaidBlock({ definition, diagramId }) {
       return;
     }
 
+    let fallbackTimer = null;
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -87,7 +190,13 @@ export default function MermaidBlock({ definition, diagramId }) {
     );
 
     observer.observe(node);
-    return () => observer.disconnect();
+    fallbackTimer = window.setTimeout(() => {
+      setIsVisible(true);
+    }, 350);
+    return () => {
+      if (fallbackTimer) window.clearTimeout(fallbackTimer);
+      observer.disconnect();
+    };
   }, [isVisible]);
 
   useEffect(() => {
@@ -105,22 +214,21 @@ export default function MermaidBlock({ definition, diagramId }) {
             startOnLoad: false,
             securityLevel: 'strict',
             theme: 'neutral',
-            deterministicIds: true,
-            deterministicIDSeed: 'research-ai-chat',
             suppressErrorRendering: true,
           });
           isMermaidInitialized = true;
         }
 
         const renderId = `${diagramId}-${hashString(normalizedDefinition)}`;
-        const result = await mermaid.render(
-          renderId,
-          normalizedDefinition,
-          containerRef.current || undefined
-        );
+        const result = await mermaid.render(renderId, normalizedDefinition);
         if (!active) return;
 
-        setSvgContent(String(result?.svg || ''));
+        const nextSvg = extractRenderedSvg(result);
+        if (!nextSvg || !nextSvg.includes('<svg')) {
+          throw new Error('Mermaid renderer returned blank output. Diagram syntax may be invalid.');
+        }
+
+        setSvgContent(nextSvg);
         setErrorMessage('');
       })
       .catch((error) => {
@@ -165,10 +273,10 @@ export default function MermaidBlock({ definition, diagramId }) {
   }, [validationError, didEmitValidationError, diagramId]);
 
   if (validationError) {
-    return null;
+    return renderMermaidError(validationError, normalizedDefinition);
   }
   if (errorMessage) {
-    return null;
+    return renderMermaidError(errorMessage, normalizedDefinition);
   }
 
   return (
@@ -176,7 +284,9 @@ export default function MermaidBlock({ definition, diagramId }) {
       <p className="ra-visual-title">Diagram</p>
 
       {!isVisible || isRendering ? (
-        <div className="ra-mermaid-skeleton" />
+        <div className="ra-mermaid-skeleton">
+          <span>Rendering diagram...</span>
+        </div>
       ) : (
         <div
           className="ra-mermaid-wrap"

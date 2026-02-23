@@ -350,10 +350,6 @@
   text-align: left;
 }
 
-.markdown-body .katex-error {
-  display: none !important;
-}
-
 .markdown-body span.math-inline:empty,
 .markdown-body span.math-display:empty {
   display: none !important;
@@ -367,6 +363,42 @@
 .markdown-body.markdown-body--error .katex,
 .markdown-body.markdown-body--error .katex .base {
   color: #b91c1c;
+}
+
+.markdown-body .ra-equation-error-shell {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.35rem 0.45rem;
+  margin: 0 0.08rem;
+  border: 1px solid #fecaca;
+  border-radius: 0.5rem;
+  background: #fff1f2;
+  color: #9f1239;
+}
+
+.markdown-body .ra-equation-error-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.markdown-body .ra-equation-error-message {
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
+
+.markdown-body .ra-equation-error-source {
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 0.73rem;
+  line-height: 1.25;
+  padding: 0.18rem 0.3rem;
+  border-radius: 0.35rem;
+  background: #ffe4e6;
+  color: #9f1239;
+  white-space: pre-wrap;
 }
 
 .ra-rich-assistant {

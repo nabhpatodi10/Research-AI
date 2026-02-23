@@ -231,6 +231,15 @@ npm run dev
 
 Frontend expects backend at `VITE_API_BASE_URL` and uses cookie auth (`credentials: include`).
 
+### Visualization Tier-2 Assets
+
+Backend visualization Tier-2 validation uses local Playwright probes with bundled vendor assets:
+
+- `backend/static/vendor/mermaid.min.js` (from Mermaid `11.12.3`)
+- `backend/static/vendor/echarts.min.js` (from ECharts `6.0.0`)
+
+When updating frontend Mermaid/ECharts versions, update these backend vendor files to keep validation behavior aligned with frontend rendering.
+
 Production deployment guardrails:
 
 - `VITE_API_BASE_URL` must point to your deployed backend origin.
