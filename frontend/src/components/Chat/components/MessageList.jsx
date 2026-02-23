@@ -118,6 +118,8 @@ export default function MessageList({
 }) {
   const statusTimeoutsRef = useRef(new Map());
   const [copyStatusById, setCopyStatusById] = useState({});
+  const [pdfStatusById, setPdfStatusById] = useState({});
+  const bubbleRefs = useRef({});
 
   useEffect(
     () => () => {
@@ -177,6 +179,208 @@ export default function MessageList({
       }
     },
     [setTransientCopyStatus]
+  );
+
+  const setTransientPdfStatus = useCallback((messageId, label, timeoutMs = 0) => {
+    const normalizedId = String(messageId || '').trim();
+    if (!normalizedId) return;
+
+    setPdfStatusById((prev) => ({ ...prev, [normalizedId]: label }));
+
+    const timeoutKey = `pdf:${normalizedId}`;
+    const existingTimeout = statusTimeoutsRef.current.get(timeoutKey);
+    if (existingTimeout) {
+      window.clearTimeout(existingTimeout);
+      statusTimeoutsRef.current.delete(timeoutKey);
+    }
+
+    if (timeoutMs > 0) {
+      const timeoutId = window.setTimeout(() => {
+        setPdfStatusById((prev) => {
+          if (prev[normalizedId] !== label) return prev;
+          const next = { ...prev };
+          delete next[normalizedId];
+          return next;
+        });
+        statusTimeoutsRef.current.delete(timeoutKey);
+      }, timeoutMs);
+      statusTimeoutsRef.current.set(timeoutKey, timeoutId);
+    }
+  }, []);
+
+  const handleDownloadPdf = useCallback(
+    async (messageId) => {
+      const normalizedId = String(messageId || '').trim();
+      const el = bubbleRefs.current[normalizedId];
+      if (!el) return;
+
+      setTransientPdfStatus(normalizedId, '…', 0);
+      try {
+        // ── 1. Deep-clone the message DOM ──
+        const clone = el.cloneNode(true);
+
+        // ── 2. Convert ECharts <canvas> → <img> (canvas content won't
+        //       survive serialisation into the print window) ──
+        const origCanvases = el.querySelectorAll('canvas');
+        const cloneCanvases = clone.querySelectorAll('canvas');
+        cloneCanvases.forEach((cc, i) => {
+          const oc = origCanvases[i];
+          if (!oc) return;
+          try {
+            const img = document.createElement('img');
+            img.src = oc.toDataURL('image/png');
+            img.style.cssText = 'width:100%;height:auto;display:block;';
+            cc.parentNode.replaceChild(img, cc);
+          } catch { /* cross-origin canvas — skip */ }
+        });
+
+        // ── 3. Collect every stylesheet from the live page so the print
+        //       window inherits all Tailwind, KaTeX, highlight.js, and
+        //       app-specific CSS rules ──
+        const styleFragments = [];
+        document.querySelectorAll('link[rel="stylesheet"], style').forEach((node) => {
+          styleFragments.push(node.outerHTML);
+        });
+
+        // ── 4. Build the print document ──
+        const printHTML = [
+          '<!DOCTYPE html><html><head><meta charset="utf-8">',
+          '<title>Research Report</title>',
+          styleFragments.join('\n'),
+          `<style>
+            @page { size: A4; margin: 18mm 15mm; }
+
+            *, *::before, *::after {
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+
+            html, body {
+              margin: 0; padding: 0;
+              background: #fff; color: #1f2937;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                           Helvetica, Arial, sans-serif;
+              font-size: 14px; line-height: 1.65;
+            }
+
+            /* ── Strip bubble chrome ── */
+            .pdf-root > * {
+              max-width: 100% !important;
+              border: none !important;
+              border-radius: 0 !important;
+              box-shadow: none !important;
+              overflow: visible !important;
+            }
+
+            /* ── Tables: show every column, no scroll ── */
+            .markdown-table-wrap,
+            .markdown-table-shell {
+              overflow: visible !important;
+              overflow-x: visible !important;
+              max-width: 100% !important;
+            }
+            table {
+              width: 100% !important;
+              max-width: 100% !important;
+              table-layout: auto !important;
+              font-size: 11px !important;
+            }
+            th, td {
+              word-break: break-word !important;
+              overflow-wrap: anywhere !important;
+              white-space: normal !important;
+            }
+
+            /* ── Page-break rules ── */
+            pre, .katex-display, table, figure,
+            .ra-visual-block, img, svg, blockquote {
+              page-break-inside: avoid;
+              break-inside: avoid;
+            }
+            h1,h2,h3,h4,h5,h6 {
+              page-break-after: avoid;
+              break-after: avoid;
+            }
+            p, li { orphans: 3; widows: 3; }
+
+            /* ── Visualisations ── */
+            .ra-chart-wrap, .ra-mermaid-wrap {
+              overflow: visible !important;
+            }
+            .ra-chart-wrap img, .ra-mermaid-wrap svg {
+              width: 100% !important;
+              max-width: 100% !important;
+              height: auto !important;
+            }
+            .ra-chart-skeleton, .ra-mermaid-skeleton {
+              display: none !important;
+            }
+            .ra-visual-block {
+              overflow: visible !important;
+              page-break-inside: avoid;
+              break-inside: avoid;
+            }
+
+            img, svg {
+              max-width: 100% !important;
+              height: auto !important;
+            }
+
+            /* ── Hide scrollbars ── */
+            ::-webkit-scrollbar { display: none !important; }
+            * { scrollbar-width: none !important; }
+
+            /* ── Code blocks: wrap instead of scroll ── */
+            pre, code {
+              white-space: pre-wrap !important;
+              word-break: break-all !important;
+              overflow: visible !important;
+            }
+          </style>`,
+          '</head><body>',
+          '<div class="pdf-root">',
+          clone.innerHTML,
+          '</div>',
+          '</body></html>',
+        ].join('\n');
+
+        // ── 5. Use a hidden iframe so the print dialog opens over the
+        //       current tab — the user never sees raw text in a new tab. ──
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = 'position:fixed;width:0;height:0;border:none;left:-9999px;top:-9999px;';
+        document.body.appendChild(iframe);
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+        iframeDoc.open();
+        iframeDoc.write(printHTML);
+        iframeDoc.close();
+
+        // Remove the iframe after the print dialog closes.
+        iframe.contentWindow.onafterprint = () => {
+          document.body.removeChild(iframe);
+        };
+
+        // ── 6. Wait for fonts + images, then trigger the print dialog ──
+        const triggerPrint = async () => {
+          try { await iframe.contentDocument.fonts.ready; } catch { /* ignore */ }
+          await new Promise((r) => setTimeout(r, 400));
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+        };
+
+        if (iframeDoc.readyState === 'complete') {
+          await triggerPrint();
+        } else {
+          iframe.addEventListener('load', triggerPrint, { once: true });
+        }
+
+        setTransientPdfStatus(normalizedId, 'Done', 2000);
+      } catch (err) {
+        if (import.meta.env.DEV) console.error('[PDF]', err);
+        setTransientPdfStatus(normalizedId, 'Failed', 2200);
+      }
+    },
+    [setTransientPdfStatus]
   );
 
   return (
@@ -247,7 +451,9 @@ export default function MessageList({
                   )}
                   {showAssistantActions ? (
                     <div className="flex min-w-0 max-w-full flex-col items-start gap-1.5">
-                      <MessageBubble msg={msg} />
+                      <div ref={(el) => { bubbleRefs.current[normalizedMessageId] = el; }} className="min-w-0 max-w-full">
+                        <MessageBubble msg={msg} />
+                      </div>
                       <div className="flex items-center gap-1.5 pl-1">
                         <button
                           type="button"
@@ -255,6 +461,14 @@ export default function MessageList({
                           className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-blue-200 hover:text-blue-700"
                         >
                           {copyStatusById[normalizedMessageId] || 'Copy'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadPdf(normalizedMessageId)}
+                          disabled={pdfStatusById[normalizedMessageId] === '…'}
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-blue-200 hover:text-blue-700 disabled:cursor-wait disabled:opacity-60"
+                        >
+                          {pdfStatusById[normalizedMessageId] || 'Save PDF'}
                         </button>
                       </div>
                     </div>
