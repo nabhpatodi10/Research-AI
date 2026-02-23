@@ -14,13 +14,25 @@ from .state import AgentExecutionState
 
 
 class ChatHistoryMiddleware(AgentMiddleware[AgentExecutionState, Any]):
-    def __init__(self, database: Database, session_id: str, model: BaseChatModel):
+    def __init__(
+        self,
+        database: Database,
+        session_id: str,
+        model: BaseChatModel,
+        run_config: dict[str, Any] | None = None,
+    ):
         self._database = database
         self._session_id = session_id
         self._model = model
+        self._run_config = dict(run_config or {})
 
     async def abefore_agent(self, state: AgentExecutionState, runtime: Any) -> dict[str, Any]:
-        chat_history = await get_chat_history(self._database, self._session_id, self._model)
+        chat_history = await get_chat_history(
+            self._database,
+            self._session_id,
+            self._model,
+            run_config=self._run_config,
+        )
         return {"chat_history": chat_history}
 
     async def awrap_model_call(self, request: Any, handler: Any) -> Any:
