@@ -24,6 +24,7 @@ from api.session import get_current_user
 from api.utils import derive_session_title
 from nodes import Nodes
 from research_progress import progress_message_for_node
+from settings import build_langsmith_thread_config
 
 
 router = APIRouter()
@@ -37,6 +38,7 @@ async def chat_endpoint(
     current_user: SessionUser = Depends(get_current_user),
 ):
     session_id = request_body.session_id or str(uuid_utils.uuid7())
+    thread_config = build_langsmith_thread_config(session_id)
     try:
         raw_user_input = str(request_body.user_input or "")
         trimmed_user_input = raw_user_input.strip()
@@ -78,6 +80,7 @@ async def chat_endpoint(
                 session_id=session_id,
                 model=request.app.state.chat_model,
                 additional_user_context=trimmed_user_input,
+                run_config=thread_config,
             )
             force_research_payload = handoff_context or trimmed_user_input
             should_clear_pending_research = True
@@ -89,6 +92,7 @@ async def chat_endpoint(
                     session_id=session_id,
                     model=request.app.state.chat_model,
                     additional_user_context=effective_user_input,
+                    run_config=thread_config,
                 )
                 force_research_payload = handoff_context or effective_user_input
                 should_clear_pending_research = True
@@ -102,6 +106,7 @@ async def chat_endpoint(
                     database=request.app.state.database,
                     session_id=session_id,
                     model=request.app.state.chat_model,
+                    run_config=thread_config,
                 )
                 if handoff_context:
                     effective_user_input = handoff_context
@@ -215,7 +220,7 @@ async def chat_endpoint(
             ask_research_topic_only=ask_research_topic_only,
             allow_research_handoff=False,
         )
-        result = await chat_agent.graph.ainvoke(state)
+        result = await chat_agent.graph.ainvoke(state, config=thread_config)
         final_document = result.get("final_document")
         try:
             final_document = final_document.as_str if final_document else None
