@@ -313,3 +313,35 @@ Escalation and safety:
                 )
             ),
         ]
+
+    def repair_visual_block_prompt(
+        self,
+        block_type: str,
+        block_content: str,
+        invalid_reason: str,
+    ) -> list[AnyMessage]:
+        normalized_type = str(block_type or "").strip().lower()
+        return [
+            SystemMessage(
+                content=(
+                    "You are repairing exactly one invalid visualization block. "
+                    "Rules: "
+                    "1) Repair only the provided block. "
+                    "2) Preserve the same block type as input (chartjson or mermaid). "
+                    "3) Output only repaired block content, with no markdown fences and no prose. "
+                    "4) If the block cannot be safely repaired, return an empty response. "
+                    "5) For chartjson, output strict JSON only with top-level object "
+                    '{ "title": string?, "caption": string?, "option": { ... } }. '
+                    "No comments, no JS functions, no trailing commas. "
+                    '6) For Mermaid, labels with punctuation/special characters must be quoted as nodeId["Label"].'
+                )
+            ),
+            HumanMessage(
+                content=(
+                    f"Block type: {normalized_type}\n"
+                    f"Invalid reason: {invalid_reason}\n\n"
+                    "Invalid block content:\n"
+                    f"{block_content}"
+                )
+            ),
+        ]
