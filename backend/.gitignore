@@ -3,7 +3,6 @@ __pycache__
 credentials.json
 token.json
 service-account-key.json
-static/
 Images/Graph.excalidraw
 *.md
 Lib
