@@ -19,6 +19,7 @@ from auth_service import FirebaseAuthService
 from browser_lifecycle import BrowserLifecycleManager, ManagedBrowser
 from custom_search import CustomSearch
 from database import Database
+from graph_modules.visual_tier2 import PlaywrightVisualTier2Validator
 from pdf_processing import PdfBackgroundWorker, PdfProcessingService
 from research_worker import ResearchBackgroundWorker
 from settings import get_settings, validate_security_settings
@@ -94,6 +95,7 @@ async def lifespan(app: FastAPI):
     browser_manager = getattr(app.state, "browser_manager", None)
     if browser_manager is not None:
         await browser_manager.stop()
+    await PlaywrightVisualTier2Validator.clear_session_limiters()
     await PdfProcessingService.aclose_shared_client()
     await CustomSearch.aclose()
     app.state.database.close_connection()
