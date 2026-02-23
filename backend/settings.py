@@ -113,6 +113,9 @@ class Settings:
     visual_tier2_chart_max_bytes: int
     visual_tier2_mermaid_asset_path: str
     visual_tier2_echarts_asset_path: str
+    visual_tier2_katex_asset_path: str
+    visual_tier2_equation_max_chars: int
+    equation_repair_max_retries: int
 
     pdf_probe_timeout_seconds: float
     pdf_primary_timeout_seconds: float
@@ -195,6 +198,12 @@ def get_settings() -> Settings:
             "VISUAL_TIER2_ECHARTS_ASSET_PATH",
             "static/vendor/echarts.min.js",
         ),
+        visual_tier2_katex_asset_path=_env_str(
+            "VISUAL_TIER2_KATEX_ASSET_PATH",
+            "static/vendor/katex.min.js",
+        ),
+        visual_tier2_equation_max_chars=_env_int("VISUAL_TIER2_EQUATION_MAX_CHARS", 4096),
+        equation_repair_max_retries=_env_int("EQUATION_REPAIR_MAX_RETRIES", 2),
         pdf_probe_timeout_seconds=_env_float("PDF_PROBE_TIMEOUT_SECONDS", 2.5),
         pdf_primary_timeout_seconds=_env_float("PDF_PRIMARY_TIMEOUT_SECONDS", 30.0),
         pdf_in_memory_timeout_seconds=_env_float("PDF_IN_MEMORY_TIMEOUT_SECONDS", 180.0),
