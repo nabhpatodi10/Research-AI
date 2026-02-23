@@ -10,6 +10,7 @@ from playwright.async_api import Browser
 
 from database import Database
 from graph import ResearchGraph
+from settings import build_langsmith_thread_config
 from structures import CompleteDocument
 from tools import Tools
 
@@ -33,7 +34,10 @@ class Agent:
             await self.__database.add_messages(self.__session_id, [no_idea_message])
             return {"messages": [no_idea_message]}
 
-        graph_result = await self.__research_graph.graph.ainvoke({"research_idea": research_idea})
+        graph_result = await self.__research_graph.graph.ainvoke(
+            {"research_idea": research_idea},
+            config=self.__thread_config,
+        )
         final_document = graph_result.get("final_document")
 
         if isinstance(final_document, CompleteDocument):
@@ -64,6 +68,7 @@ class Agent:
     ):
         self.__session_id = session_id
         self.__database = database
+        self.__thread_config = build_langsmith_thread_config(session_id)
         self.__research_graph = ResearchGraph(
             session_id=session_id,
             database=database,
@@ -116,7 +121,12 @@ class Agent:
                     force_research_payload=force_research_payload if allow_research_handoff else None,
                     ask_research_topic_only=ask_research_topic_only,
                 ),
-                ChatHistoryMiddleware(database, session_id, model),
+                ChatHistoryMiddleware(
+                    database,
+                    session_id,
+                    model,
+                    run_config=self.__thread_config,
+                ),
                 UnknownToolFallbackMiddleware(),
                 PersistMessagesMiddleware(database, session_id),
             ],
