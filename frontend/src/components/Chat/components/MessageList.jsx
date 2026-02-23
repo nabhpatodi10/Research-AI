@@ -93,7 +93,7 @@ function MessageBubble({ msg }) {
     return (
       <div className="max-w-full overflow-hidden rounded-2xl border border-blue-100 bg-white text-slate-800 shadow-sm md:max-w-[78%]">
         <Suspense fallback={<div className="px-4 py-3 text-sm text-slate-500">Rendering response...</div>}>
-          <RichAssistantMessage content={msg.text} />
+          <RichAssistantMessage content={msg.text} messageId={msg.id} />
         </Suspense>
       </div>
     );
