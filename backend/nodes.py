@@ -345,3 +345,39 @@ Escalation and safety:
                 )
             ),
         ]
+
+    def repair_equation_prompt(
+        self,
+        delimiter_style: str,
+        expression: str,
+        invalid_reason: str,
+    ) -> list[AnyMessage]:
+        style = str(delimiter_style or "").strip().lower()
+        style_desc = {
+            "inline_dollar": "inline ($...$)",
+            "block_dollar": "display ($$...$$)",
+            "block_bracket": "display (\\[...\\])",
+            "inline_paren": "inline (\\(...\\))",
+        }.get(style, style)
+        return [
+            SystemMessage(
+                content=(
+                    "You are repairing exactly one invalid LaTeX/KaTeX math equation. "
+                    "Rules: "
+                    "1) Repair only the provided equation expression. "
+                    "2) Output only the corrected expression content, without any delimiters. "
+                    "3) If the equation cannot be safely repaired, return an empty response. "
+                    "4) Preserve the mathematical meaning of the original expression as closely as possible. "
+                    "5) Ensure \\left/\\right pairs are balanced. "
+                    "6) Ensure \\begin{env}/\\end{env} environments are properly opened and closed."
+                )
+            ),
+            HumanMessage(
+                content=(
+                    f"Delimiter style: {style_desc}\n"
+                    f"Invalid reason: {invalid_reason}\n\n"
+                    "Invalid equation expression:\n"
+                    f"{expression}"
+                )
+            ),
+        ]
