@@ -104,7 +104,7 @@ class CompleteDocument(BaseModel):
                 references.append(citation_text)
 
         references_block = (
-            "\n".join([f"[{i}] {citation}" for i, citation in enumerate(references, start=1)])
+            "\n\n".join([f"[{i}] {citation}" for i, citation in enumerate(references, start=1)])
             if references
             else "No references provided."
         )
