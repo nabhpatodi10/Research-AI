@@ -12,6 +12,7 @@
   "dependencies": {
     "@headlessui/react": "^2.2.1",
     "@tailwindcss/vite": "^4.1.0",
+    "@vercel/analytics": "^1.6.1",
     "echarts": "^6.0.0",
     "echarts-for-react": "^3.0.6",
     "github-markdown-css": "^5.8.1",
