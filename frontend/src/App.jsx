@@ -1,5 +1,6 @@
 import { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { Analytics } from '@vercel/analytics/react';
 import { AuthProvider } from './context/AuthContext';
 import PrivateRoute from './components/PrivateRoute';
 import Home from './components/Home';
@@ -47,6 +48,7 @@ function App() {
           </main>
           <Footer className="mt-auto" />
         </div>
+        <Analytics />
       </AuthProvider>
     </Router>
   );
