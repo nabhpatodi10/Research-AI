@@ -384,7 +384,10 @@ export default function MessageList({
   );
 
   return (
-    <section ref={chatScrollContainerRef} className="flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-7">
+    <section
+      ref={chatScrollContainerRef}
+      className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 py-6 md:px-8 md:py-7"
+    >
       <div className="mx-auto w-full max-w-5xl">
         {chatLoading ? (
           <div className="space-y-4">
