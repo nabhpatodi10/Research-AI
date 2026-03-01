@@ -520,7 +520,7 @@ export default function ChatInterface() {
       const payload = await apiRequest('/chat', {
         method: 'POST',
         body: JSON.stringify(requestBody),
-        timeoutMs: 60_000,
+        timeoutMs: 600_000,
       });
 
       const responseKind = String(payload?.kind || '').trim().toLowerCase();
@@ -767,7 +767,7 @@ export default function ChatInterface() {
         )}
       </aside>
 
-      <main className="relative flex min-w-0 flex-1 flex-col pt-16">
+      <main className="relative flex min-h-0 min-w-0 flex-1 flex-col pt-16">
         <header className="border-b border-blue-100/90 bg-white/75 px-4 py-3 backdrop-blur-md md:px-6">
           <div className="flex w-full items-center justify-between gap-3 md:pl-1">
             <div className="flex min-w-0 items-center gap-2">
