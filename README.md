@@ -402,6 +402,15 @@ Every Mermaid diagram, ChartJSON block, and KaTeX equation in every research sec
 | `CORS_ORIGINS` | — | Comma-separated allowed origins |
 | `FRONTEND_BASE_URL` | `http://localhost:3000` | Primary frontend origin |
 
+### Expert Context Summarization
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `EXPERT_CONTEXT_SUMMARIZATION_ENABLED` | `true` | Enable built-in specialist-agent history summarization middleware |
+| `EXPERT_CONTEXT_SUMMARY_TRIGGER_TOKENS` | `350000` | Token threshold that triggers summarization for specialist agents |
+| `EXPERT_CONTEXT_SUMMARY_KEEP_MESSAGES` | `10` | Number of most recent messages retained after summarization |
+| `EXPERT_CONTEXT_SUMMARY_TRIM_TOKENS_TO_SUMMARIZE` | `350000` | Max tokens of historical context sent into the summarization call |
+
 ### Visualization Validation
 
 | Variable | Default | Purpose |
