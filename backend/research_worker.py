@@ -8,6 +8,7 @@ from playwright.async_api import Browser
 
 from database import Database
 from graph import ResearchGraph
+from graph_modules.runtime_modules.errors import ResearchTerminalError
 from research_progress import progress_message_for_node
 from settings import get_settings
 from structures import CompleteDocument
@@ -129,13 +130,19 @@ class ResearchBackgroundWorker:
         )
 
         try:
-            async def _progress(node_name: str) -> None:
+            async def _progress(
+                node_name: str,
+                progress_message: str | None = None,
+            ) -> None:
                 nonlocal current_node_tracker
                 current_node_tracker = str(node_name or "").strip() or current_node_tracker
                 await self._database.update_research_job_progress(
                     job_id=job_id,
                     current_node=node_name,
-                    progress_message=progress_message_for_node(node_name),
+                    progress_message=(
+                        str(progress_message or "").strip()
+                        or progress_message_for_node(node_name)
+                    ),
                     status="running",
                 )
 
@@ -162,6 +169,19 @@ class ResearchBackgroundWorker:
                 task_id=job_id,
             )
             logger.info("Completed research job %s for session %s.", job_id, session_id)
+        except ResearchTerminalError as error:
+            await self._database.mark_research_job_failed(
+                job_id=job_id,
+                error_message=str(error),
+                attempts=attempts + 1,
+                resume_from_node=current_node_tracker,
+            )
+            await self._database.clear_user_session_active_task_if_matches(
+                user_id=user_id,
+                session_id=session_id,
+                task_id=job_id,
+            )
+            logger.error("Job %s failed terminally: %s", job_id, error)
         except asyncio.CancelledError:
             raise
         except Exception as error:
