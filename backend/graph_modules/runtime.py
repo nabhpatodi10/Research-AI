@@ -73,6 +73,21 @@ class ResearchGraph:
         )
         self.__summary_model = ChatGoogleGenerativeAI(model="models/gemini-flash-lite-latest")
         self.__progress_callback = progress_callback
+        self.__expert_context_summarization_enabled = bool(
+            settings.expert_context_summarization_enabled
+        )
+        self.__expert_context_summary_trigger_tokens = max(
+            1,
+            int(settings.expert_context_summary_trigger_tokens),
+        )
+        self.__expert_context_summary_keep_messages = max(
+            1,
+            int(settings.expert_context_summary_keep_messages),
+        )
+        self.__expert_context_summary_trim_tokens_to_summarize = max(
+            1,
+            int(settings.expert_context_summary_trim_tokens_to_summarize),
+        )
         self.__final_content_model = ChatOpenAI(
             model=gpt_model_name,
             reasoning={"effort": "high"},
@@ -293,6 +308,13 @@ class ResearchGraph:
             node_builder=self.__node,
             tools=self.__tools,
             run_expert_pipeline=self.__run_expert_pipeline,
+            summary_model=self.__summary_model,
+            expert_context_summarization_enabled=self.__expert_context_summarization_enabled,
+            expert_context_summary_trigger_tokens=self.__expert_context_summary_trigger_tokens,
+            expert_context_summary_keep_messages=self.__expert_context_summary_keep_messages,
+            expert_context_summary_trim_tokens_to_summarize=(
+                self.__expert_context_summary_trim_tokens_to_summarize
+            ),
         )
 
     def __build_low_breadth_document(self, state: graphSchema):
