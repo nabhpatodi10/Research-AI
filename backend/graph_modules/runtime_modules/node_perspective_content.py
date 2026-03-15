@@ -4,8 +4,45 @@ import asyncio
 from typing import Any
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import SummarizationMiddleware
 
 from ..helpers import fallback_section_text
+
+
+HIGH_FIDELITY_SUMMARY_PROMPT = """
+Summarize the prior conversation context for a specialist research agent.
+
+You must preserve critical information with high fidelity. Do not fabricate information.
+If a section has nothing relevant, write "None".
+
+Use exactly this structure:
+
+## SESSION GOAL
+State the overall research objective and what this specialist is currently trying to produce.
+
+## REQUIRED CONSTRAINTS
+Capture all explicit constraints and requirements (formatting, scope, exclusions, quality bars, citation rules, equation/chart requirements, etc.).
+
+## KEY DECISIONS
+List important decisions already made, including rationale when present.
+
+## TOOL FINDINGS
+Summarize important tool outcomes and factual findings, including contradictions or uncertainty.
+
+## SOURCES / CITATIONS
+List important URLs or source references already established.
+
+## OPEN QUESTIONS / ASSUMPTIONS
+Capture unresolved questions, assumptions, and pending clarifications.
+
+## EXECUTION STATE
+Describe what has already been completed and what remains to be done next.
+
+Return only the structured summary.
+
+Messages to summarize:
+{messages}
+""".strip()
 
 
 async def run_generate_content_for_perspectives(
@@ -14,9 +51,14 @@ async def run_generate_content_for_perspectives(
     emit_progress: Any,
     gpt_model: Any,
     gemini_model: Any,
+    summary_model: Any,
     node_builder: Any,
     tools: list[Any],
     run_expert_pipeline: Any,
+    expert_context_summarization_enabled: bool,
+    expert_context_summary_trigger_tokens: int,
+    expert_context_summary_keep_messages: int,
+    expert_context_summary_trim_tokens_to_summarize: int,
 ) -> dict[str, Any]:
     await emit_progress("generate_content_for_perspectives")
     sections = list(state["document_outline"].sections)
@@ -27,10 +69,25 @@ async def run_generate_content_for_perspectives(
     for index, expert in enumerate(state["perspectives"].experts):
         model = gpt_model if index % 2 == 0 else gemini_model
         system_prompt = node_builder.perspective_agent(expert, state["document_outline"].as_str)
+        middleware = []
+        if expert_context_summarization_enabled:
+            middleware = [
+                SummarizationMiddleware(
+                    model=summary_model,
+                    trigger=("tokens", max(1, int(expert_context_summary_trigger_tokens))),
+                    keep=("messages", max(1, int(expert_context_summary_keep_messages))),
+                    trim_tokens_to_summarize=max(
+                        1,
+                        int(expert_context_summary_trim_tokens_to_summarize),
+                    ),
+                    summary_prompt=HIGH_FIDELITY_SUMMARY_PROMPT,
+                )
+            ]
         expert_agent = create_agent(
             model=model,
             tools=tools,
             system_prompt=system_prompt,
+            middleware=middleware,
         )
         expert_name = str(getattr(expert, "name", f"Expert {index + 1}") or f"Expert {index + 1}")
         expert_agents.append((index, expert_name, expert_agent))
