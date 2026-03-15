@@ -5,11 +5,18 @@ import inspect
 from typing import Any
 
 
-async def emit_progress(progress_callback: Any, node_name: str) -> None:
+async def emit_progress(
+    progress_callback: Any,
+    node_name: str,
+    progress_message: str | None = None,
+) -> None:
     if progress_callback is None:
         return
     try:
-        maybe_result = progress_callback(node_name)
+        try:
+            maybe_result = progress_callback(node_name, progress_message)
+        except TypeError:
+            maybe_result = progress_callback(node_name)
         if inspect.isawaitable(maybe_result):
             await maybe_result
     except asyncio.CancelledError:
@@ -26,6 +33,7 @@ async def emit_state_checkpoint(
     state: dict[str, Any],
     serialize_state: Any,
     next_node_after: Any,
+    resume_from_node: str | None = None,
 ) -> None:
     if checkpoint_callback is None:
         return
@@ -33,7 +41,9 @@ async def emit_state_checkpoint(
         maybe_result = checkpoint_callback(
             completed_node,
             serialize_state(state),
-            next_node_after(completed_node),
+            next_node_after(completed_node)
+            if resume_from_node is None
+            else str(resume_from_node or "").strip() or None,
         )
         if inspect.isawaitable(maybe_result):
             await maybe_result
