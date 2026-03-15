@@ -150,14 +150,19 @@ class ResearchGraph:
     ) -> str | None:
         return resolve_resume_node(cls.NODE_SEQUENCE, requested_node, state)
 
-    async def __emit_progress(self, node_name: str) -> None:
-        await emit_progress(self.__progress_callback, node_name)
+    async def __emit_progress(
+        self,
+        node_name: str,
+        progress_message: str | None = None,
+    ) -> None:
+        await emit_progress(self.__progress_callback, node_name, progress_message)
 
     async def __emit_state_checkpoint(
         self,
         callback: Any,
         completed_node: str,
         state: dict[str, Any],
+        resume_from_node: str | None = None,
     ) -> None:
         await emit_state_checkpoint(
             callback,
@@ -165,6 +170,7 @@ class ResearchGraph:
             state=state,
             serialize_state=self.serialize_graph_state,
             next_node_after=self._next_node_after,
+            resume_from_node=resume_from_node,
         )
 
     async def run_resumable(
@@ -185,8 +191,18 @@ class ResearchGraph:
         run_map = {
             "generate_document_outline": self.__generate_document_outline,
             "generate_perspectives": self.__generate_perspectives,
-            "generate_content_for_perspectives": self.__generate_content_for_perspectives,
-            "final_section_generation": self.__final_section_generation,
+            "generate_content_for_perspectives": lambda current_state: (
+                self.__generate_content_for_perspectives(
+                    current_state,
+                    checkpoint_callback=checkpoint_callback,
+                )
+            ),
+            "final_section_generation": lambda current_state: (
+                self.__final_section_generation(
+                    current_state,
+                    checkpoint_callback=checkpoint_callback,
+                )
+            ),
         }
 
         should_run = False
@@ -214,16 +230,23 @@ class ResearchGraph:
         expert_name: str,
         expert_agent: object,
         sections: list,
+        saved_progress: dict[str, Any] | None = None,
+        emit_progress: Any = None,
+        persist_progress: Any = None,
     ) -> list[str]:
         return await run_expert_pipeline(
             expert_index=expert_index,
             expert_name=expert_name,
             expert_agent=expert_agent,
             sections=sections,
+            saved_progress=saved_progress,
+            emit_progress=emit_progress,
+            persist_progress=persist_progress,
             summary_model=self.__summary_model,
             node_builder=self.__node,
             section_retry_delays=self.__section_retry_delays,
             section_attempt_timeout_seconds=self.__section_attempt_timeout_seconds,
+            section_context_keep_messages=self.__expert_context_summary_keep_messages,
             run_config=self.__thread_config,
         )
 
@@ -299,10 +322,23 @@ class ResearchGraph:
             run_config=self.__thread_config,
         )
 
-    async def __generate_content_for_perspectives(self, state: graphSchema):
+    async def __generate_content_for_perspectives(
+        self,
+        state: graphSchema,
+        checkpoint_callback: Any = None,
+    ):
+        async def _checkpoint_node(current_state: dict[str, Any], node_name: str) -> None:
+            await self.__emit_state_checkpoint(
+                callback=checkpoint_callback,
+                completed_node=node_name,
+                state=current_state,
+                resume_from_node=node_name,
+            )
+
         return await run_generate_content_for_perspectives(
             state,
             emit_progress=self.__emit_progress,
+            emit_state_checkpoint=_checkpoint_node,
             gpt_model=self.__gpt_model,
             gemini_model=self.__gemini_model,
             node_builder=self.__node,
@@ -320,10 +356,23 @@ class ResearchGraph:
     def __build_low_breadth_document(self, state: graphSchema):
         return build_low_breadth_document(state)
 
-    async def __final_section_generation(self, state: graphSchema):
+    async def __final_section_generation(
+        self,
+        state: graphSchema,
+        checkpoint_callback: Any = None,
+    ):
+        async def _checkpoint_node(current_state: dict[str, Any], node_name: str) -> None:
+            await self.__emit_state_checkpoint(
+                callback=checkpoint_callback,
+                completed_node=node_name,
+                state=current_state,
+                resume_from_node=node_name,
+            )
+
         return await run_final_section_generation(
             state,
             emit_progress=self.__emit_progress,
+            emit_state_checkpoint=_checkpoint_node,
             research_breadth=self.__research_breadth,
             build_low_breadth_document=self.__build_low_breadth_document,
             generate_final_section=self.__generate_final_section,
