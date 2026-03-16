@@ -1,4 +1,9 @@
 const INLINE_EXPLICIT_MATH_RE = /\\\((.+?)\\\)/gs;
+const EXPLICIT_DISPLAY_BLOCK_RE = /\\\[([\s\S]*?)\\\]|\$\$([\s\S]*?)\$\$/g;
+const LEGACY_NESTED_INLINE_PAREN_RE = /\$\\\(([\s\S]*?)\\\)\$/g;
+const LEGACY_NESTED_DISPLAY_PAREN_RE = /\$\$\\\(([\s\S]*?)\\\)\$\$/g;
+const LEGACY_NESTED_INLINE_BRACKET_RE = /\$\\\[([\s\S]*?)\\\]\$/g;
+const LEGACY_NESTED_DISPLAY_BRACKET_RE = /\$\$\\\[([\s\S]*?)\\\]\$\$/g;
 
 const DANGLING_OPERATOR_RE =
   /(?:[=+\-*/<>]|\\(?:approx|sim|simeq|neq|ne|le|leq|ge|geq|to|rightarrow|leftarrow|leftrightarrow|mapsto|in|notin|subset|subseteq|supset|supseteq|times|cdot|pm|mp))\s*$/;
@@ -85,20 +90,97 @@ function looksLikeSentenceFragment(value) {
   return words.length >= 2;
 }
 
-export function normalizeMarkdownMath(value) {
-  const text = String(value ?? '');
-  const withDisplayBlocks = text.replace(
-    /\\\[((?:.|\n)*?)\\\]/g,
-    (_, expr) => `\n\n$$\n${String(expr).trim()}\n$$\n\n`
-  );
+function wrapInlineMath(expression) {
+  return `$${String(expression ?? '').trim()}$`;
+}
 
-  return withDisplayBlocks
+function wrapDisplayMath(expression) {
+  return '\n\n$$\n' + String(expression ?? '').trim() + '\n$$\n\n';
+}
+
+function unwrapSingleDollarMath(value) {
+  const text = String(value ?? '').trim();
+  if (!text.startsWith('$') || !text.endsWith('$') || text.startsWith('$$') || text.endsWith('$$')) {
+    return null;
+  }
+  const expression = text.slice(1, -1);
+  if (hasUnescapedDollar(expression)) {
+    return null;
+  }
+  return expression;
+}
+
+function unwrapRedundantMathWrapper(value) {
+  const text = String(value ?? '').trim();
+  const inlineParenMatch = text.match(/^\\\(([\s\S]*?)\\\)$/);
+  if (inlineParenMatch) {
+    return inlineParenMatch[1];
+  }
+
+  const displayBracketMatch = text.match(/^\\\[([\s\S]*?)\\\]$/);
+  if (displayBracketMatch) {
+    return displayBracketMatch[1];
+  }
+
+  const blockDollarMatch = text.match(/^\$\$([\s\S]*?)\$\$$/);
+  if (blockDollarMatch) {
+    return blockDollarMatch[1];
+  }
+
+  return unwrapSingleDollarMath(text);
+}
+
+function collapseRedundantMathWrappers(value) {
+  let current = String(value ?? '').trim();
+  let next = unwrapRedundantMathWrapper(current);
+  while (typeof next === 'string') {
+    current = String(next).trim();
+    next = unwrapRedundantMathWrapper(current);
+  }
+  return current;
+}
+
+function canonicalizeLegacyNestedMath(value) {
+  return String(value ?? '')
+    .replace(LEGACY_NESTED_DISPLAY_PAREN_RE, (_, expr) => wrapDisplayMath(collapseRedundantMathWrappers(expr)))
+    .replace(LEGACY_NESTED_DISPLAY_BRACKET_RE, (_, expr) => wrapDisplayMath(collapseRedundantMathWrappers(expr)))
+    .replace(LEGACY_NESTED_INLINE_BRACKET_RE, (_, expr) => wrapDisplayMath(collapseRedundantMathWrappers(expr)))
+    .replace(LEGACY_NESTED_INLINE_PAREN_RE, (_, expr) => wrapInlineMath(collapseRedundantMathWrappers(expr)));
+}
+
+function protectExplicitDisplayMath(value) {
+  const placeholders = [];
+  const protectedText = String(value ?? '').replace(
+    EXPLICIT_DISPLAY_BLOCK_RE,
+    (_, bracketExpr, dollarExpr) => {
+      const expression = collapseRedundantMathWrappers(bracketExpr ?? dollarExpr ?? '');
+      const placeholder = `@@RA_DISPLAY_MATH_${placeholders.length}@@`;
+      placeholders.push(wrapDisplayMath(expression));
+      return placeholder;
+    }
+  );
+  return { protectedText, placeholders };
+}
+
+function restoreExplicitDisplayMath(value, placeholders) {
+  let restored = String(value ?? '');
+  placeholders.forEach((block, index) => {
+    restored = restored.replace(`@@RA_DISPLAY_MATH_${index}@@`, () => block);
+  });
+  return restored;
+}
+
+export function normalizeMarkdownMath(value) {
+  const canonicalized = canonicalizeLegacyNestedMath(value);
+  const { protectedText, placeholders } = protectExplicitDisplayMath(canonicalized);
+
+  const normalized = protectedText
     .split('\n')
     .map((line) => {
       const bracketMatch = line.match(STANDALONE_BRACKET_LATEX_RE);
       if (bracketMatch) {
         const [, prefix, expr, suffix] = bracketMatch;
-        return `${prefix}$$${String(expr).trim()}$$${suffix}`;
+        return `${prefix}` + wrapDisplayMath(expr).trim() + `${suffix}`;
       }
 
       const equationMatch = line.match(STANDALONE_EQUATION_RE);
@@ -110,6 +192,8 @@ export function normalizeMarkdownMath(value) {
       return line;
     })
     .join('\n');
+
+  return restoreExplicitDisplayMath(normalized, placeholders);
 }
 
 function createInlineMathNode(value) {
