@@ -162,11 +162,13 @@ class ResearchGraph:
         self,
         node_name: str,
         progress_message: str | None = None,
+        progress_details: dict[str, Any] | None = None,
     ) -> None:
         await emit_progress(
             self.__progress_callback,
             node_name,
             progress_message,
+            progress_details,
             timeout_seconds=self.__callback_timeout_seconds,
         )
 
@@ -245,7 +247,7 @@ class ResearchGraph:
         expert_agent: object,
         sections: list,
         saved_progress: dict[str, Any] | None = None,
-        emit_progress: Any = None,
+        emit_expert_status: Any = None,
         persist_progress: Any = None,
     ) -> list[str]:
         return await run_expert_pipeline(
@@ -254,7 +256,7 @@ class ResearchGraph:
             expert_agent=expert_agent,
             sections=sections,
             saved_progress=saved_progress,
-            emit_progress=emit_progress,
+            emit_expert_status=emit_expert_status,
             persist_progress=persist_progress,
             summary_model=self.__summary_model,
             node_builder=self.__node,
