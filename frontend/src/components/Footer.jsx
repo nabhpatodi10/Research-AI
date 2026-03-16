@@ -7,7 +7,7 @@ export default function Footer() {
 
   return (
     <footer className="bg-slate-950 text-white pt-14 pb-10">
-      <div className="max-w-6xl mx-auto px-4">
+      <div className="mx-auto max-w-6xl px-4">
         <div className="grid gap-10 md:grid-cols-[1.2fr_0.9fr_0.9fr]">
           <div>
             <h3 className="brand-display text-2xl font-bold text-blue-300">ResearchAI</h3>
@@ -38,8 +38,20 @@ export default function Footer() {
           </div>
         </div>
 
-        <div className="mt-10 border-t border-slate-800 pt-6 text-xs text-slate-400">
-          <p>© {year} ResearchAI. All rights reserved.</p>
+        <div className="mt-10 flex flex-col gap-2 border-t border-slate-800 pt-6 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+          <p>Copyright {year} ResearchAI. All rights reserved.</p>
+          <p>
+            Built by{' '}
+            <a
+              href="https://nabhpatodi.com"
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-blue-300 transition-colors hover:text-white"
+            >
+              Nabh Patodi
+            </a>
+            .
+          </p>
         </div>
       </div>
     </footer>
