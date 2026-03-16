@@ -17,6 +17,225 @@ from .errors import ResearchOwnershipLostError
 from .section_generation import normalize_saved_section_results
 
 
+_ACTIVE_EXPERT_STATUSES = {"writing", "warm_retry", "cold_retry", "compacting"}
+
+
+def _build_expert_display_text(
+    *,
+    index: int,
+    name: str,
+    status: str,
+    status_label: str,
+    section_index: int | None,
+    section_total: int | None,
+    section_title: str | None,
+) -> str:
+    prefix = f"Expert {index + 1}: {name}"
+    normalized_status = str(status or "").strip().lower()
+    normalized_title = str(section_title or "").strip()
+    has_section = section_index is not None and section_total is not None
+    section_suffix = (
+        f" (Section {section_index}/{section_total})"
+        if has_section
+        else ""
+    )
+    if normalized_status == "completed":
+        if section_total is not None:
+            return f"{prefix} - Completed all sections ({section_total}/{section_total})"
+        return f"{prefix} - Completed"
+    if normalized_status == "skipped":
+        title_text = normalized_title or "current section"
+        return f"{prefix} - Skipped {title_text}{section_suffix}"
+    if normalized_status == "compacting":
+        title_text = normalized_title or "current section"
+        return f"{prefix} - Compacting context for {title_text}{section_suffix}"
+    if normalized_status == "queued":
+        title_text = normalized_title or "next section"
+        return f"{prefix} - Queued for {title_text}{section_suffix}"
+    title_text = normalized_title or "current section"
+    return f"{prefix} - {status_label} {title_text}{section_suffix}"
+
+
+def _build_expert_status_entry(
+    *,
+    expert_index: int,
+    expert_name: str,
+    status: str,
+    status_label: str,
+    section_index: int | None,
+    section_total: int | None,
+    section_title: str | None,
+) -> dict[str, Any]:
+    normalized_section_index = int(section_index) if section_index is not None else None
+    normalized_section_total = int(section_total) if section_total is not None else None
+    normalized_title = str(section_title or "").strip() or None
+    normalized_status = str(status or "").strip().lower() or "queued"
+    normalized_status_label = str(status_label or "").strip() or "Queued"
+    return {
+        "index": int(expert_index),
+        "name": str(expert_name or f"Expert {expert_index + 1}"),
+        "status": normalized_status,
+        "status_label": normalized_status_label,
+        "section_index": normalized_section_index,
+        "section_total": normalized_section_total,
+        "section_title": normalized_title,
+        "display_text": _build_expert_display_text(
+            index=int(expert_index),
+            name=str(expert_name or f"Expert {expert_index + 1}"),
+            status=normalized_status,
+            status_label=normalized_status_label,
+            section_index=normalized_section_index,
+            section_total=normalized_section_total,
+            section_title=normalized_title,
+        ),
+    }
+
+
+def _build_initial_expert_status_entry(
+    *,
+    expert_index: int,
+    expert_name: str,
+    sections: list[Any],
+    saved_progress: dict[str, Any] | None,
+) -> dict[str, Any]:
+    section_results = normalize_saved_section_results(saved_progress, sections)
+    total_sections = len(sections)
+    if total_sections == 0:
+        return _build_expert_status_entry(
+            expert_index=expert_index,
+            expert_name=expert_name,
+            status="completed",
+            status_label="Completed",
+            section_index=None,
+            section_total=None,
+            section_title=None,
+        )
+
+    if len(section_results) >= total_sections:
+        last_title = str(
+            getattr(sections[-1], "section_title", f"Section {total_sections}") or f"Section {total_sections}"
+        )
+        return _build_expert_status_entry(
+            expert_index=expert_index,
+            expert_name=expert_name,
+            status="completed",
+            status_label="Completed",
+            section_index=total_sections,
+            section_total=total_sections,
+            section_title=last_title,
+        )
+
+    next_section = sections[len(section_results)]
+    next_title = str(
+        getattr(next_section, "section_title", f"Section {len(section_results) + 1}")
+        or f"Section {len(section_results) + 1}"
+    )
+    return _build_expert_status_entry(
+        expert_index=expert_index,
+        expert_name=expert_name,
+        status="queued",
+        status_label="Queued",
+        section_index=len(section_results) + 1,
+        section_total=total_sections,
+        section_title=next_title,
+    )
+
+
+def _build_expert_progress_details(expert_statuses: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    if not isinstance(expert_statuses, dict) or len(expert_statuses) == 0:
+        return None
+
+    ordered = [
+        expert_statuses[key]
+        for key in sorted(expert_statuses, key=lambda value: int(value))
+        if isinstance(expert_statuses.get(key), dict)
+    ]
+    if len(ordered) == 0:
+        return None
+
+    total = len(ordered)
+    active = sum(
+        1
+        for entry in ordered
+        if str(entry.get("status") or "").strip().lower() in _ACTIVE_EXPERT_STATUSES
+    )
+    completed = sum(
+        1
+        for entry in ordered
+        if str(entry.get("status") or "").strip().lower() == "completed"
+    )
+    queued = sum(
+        1
+        for entry in ordered
+        if str(entry.get("status") or "").strip().lower() == "queued"
+    )
+
+    if completed >= total:
+        summary_text = f"All {total} experts finished writing."
+    elif active > 0:
+        summary_text = f"{active} of {total} experts actively writing."
+    elif queued >= total:
+        summary_text = f"Preparing {total} experts to write their sections."
+    else:
+        summary_text = f"{completed} of {total} experts completed."
+
+    return {
+        "kind": "expert_progress",
+        "summary_text": summary_text,
+        "experts": ordered,
+    }
+
+
+async def _emit_progress_update(
+    emit_progress: Any,
+    node_name: str,
+    progress_message: str | None = None,
+    progress_details: dict[str, Any] | None = None,
+) -> None:
+    if emit_progress is None:
+        return
+
+    try:
+        signature = inspect.signature(emit_progress)
+    except (TypeError, ValueError):
+        signature = None
+
+    if signature is None:
+        try:
+            maybe_result = emit_progress(node_name, progress_message, progress_details)
+        except TypeError:
+            try:
+                maybe_result = emit_progress(node_name, progress_message)
+            except TypeError:
+                maybe_result = emit_progress(node_name)
+    else:
+        parameters = signature.parameters
+        supports_kwargs = any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+        positional_count = len(
+            [
+                parameter
+                for parameter in parameters.values()
+                if parameter.kind
+                in {
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                }
+            ]
+        )
+        if positional_count >= 3 or supports_kwargs:
+            maybe_result = emit_progress(node_name, progress_message, progress_details)
+        elif positional_count >= 2:
+            maybe_result = emit_progress(node_name, progress_message)
+        else:
+            maybe_result = emit_progress(node_name)
+
+    if inspect.isawaitable(maybe_result):
+        await maybe_result
+
+
 class _ExpertProgressFlusher:
     def __init__(
         self,
@@ -34,13 +253,24 @@ class _ExpertProgressFlusher:
         self._dirty_revision = 0
         self._flushed_revision = 0
         self._latest_progress_message: str | None = None
+        self._expert_statuses: dict[str, dict[str, Any]] = {}
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
         if self._task is None:
             self._task = asyncio.create_task(self._run())
 
-    async def update(
+    async def seed_statuses(self, entries: list[dict[str, Any]]) -> None:
+        async with self._lock:
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                index = str(int(entry.get("index") or 0))
+                self._expert_statuses[index] = dict(entry)
+            self._dirty_revision += 1
+            self._wake_event.set()
+
+    async def update_saved_progress(
         self,
         *,
         expert_index: int,
@@ -60,15 +290,31 @@ class _ExpertProgressFlusher:
             self._latest_progress_message = str(progress_message or "").strip() or None
             self._wake_event.set()
 
+    async def update_status(
+        self,
+        *,
+        expert_index: int,
+        status_entry: dict[str, Any],
+    ) -> None:
+        async with self._lock:
+            self._expert_statuses[str(expert_index)] = dict(status_entry)
+            self._dirty_revision += 1
+            self._wake_event.set()
+
     async def flush_now(self) -> None:
         while True:
             snapshot = await self._snapshot()
             if snapshot is None:
                 return
 
-            revision, progress_message, checkpoint_state = snapshot
+            revision, progress_message, progress_details, checkpoint_state = snapshot
             if progress_message:
-                await self._emit_progress("generate_content_for_perspectives", progress_message)
+                await _emit_progress_update(
+                    self._emit_progress,
+                    "generate_content_for_perspectives",
+                    progress_message,
+                    progress_details,
+                )
             await self._emit_state_checkpoint(
                 checkpoint_state,
                 "generate_content_for_perspectives",
@@ -85,7 +331,7 @@ class _ExpertProgressFlusher:
             finally:
                 self._task = None
 
-    async def _snapshot(self) -> tuple[int, str | None, dict[str, Any]] | None:
+    async def _snapshot(self) -> tuple[int, str | None, dict[str, Any] | None, dict[str, Any]] | None:
         async with self._lock:
             if self._dirty_revision <= self._flushed_revision:
                 return None
@@ -94,7 +340,13 @@ class _ExpertProgressFlusher:
             if "expert_progress" in self._state:
                 checkpoint_state["expert_progress"] = copy.deepcopy(self._state["expert_progress"])
             revision = self._dirty_revision
-            return revision, self._latest_progress_message, checkpoint_state
+            progress_details = _build_expert_progress_details(copy.deepcopy(self._expert_statuses))
+            progress_message = (
+                str(progress_details.get("summary_text") or "").strip()
+                if isinstance(progress_details, dict)
+                else self._latest_progress_message
+            )
+            return revision, progress_message or None, progress_details, checkpoint_state
 
     async def _mark_flushed(self, revision: int) -> None:
         async with self._lock:
@@ -318,6 +570,22 @@ async def run_generate_content_for_perspectives(
         return {"perspective_content": []}
 
     expert_tasks: list[asyncio.Task[list[str]]] = []
+    if progress_flusher is not None:
+        initial_statuses = [
+            _build_initial_expert_status_entry(
+                expert_index=index,
+                expert_name=str(getattr(expert, "name", f"Expert {index + 1}") or f"Expert {index + 1}"),
+                sections=sections,
+                saved_progress=(
+                    saved_expert_progress.get(str(index))
+                    if isinstance(saved_expert_progress.get(str(index)), dict)
+                    else None
+                ),
+            )
+            for index, expert in enumerate(experts)
+        ]
+        await progress_flusher.seed_statuses(initial_statuses)
+
     for expert_index, expert_name, expert_agent in expert_agents:
         saved_progress = saved_expert_progress.get(str(expert_index))
         async def _persist_for_expert(
@@ -328,11 +596,31 @@ async def run_generate_content_for_perspectives(
             _expert_name: str = expert_name,
         ) -> None:
             assert progress_flusher is not None
-            await progress_flusher.update(
+            await progress_flusher.update_saved_progress(
                 expert_index=_expert_index,
                 expert_name=_expert_name,
                 progress_payload=progress_payload,
                 progress_message=progress_message,
+            )
+
+        async def _emit_status_for_expert(
+            status_payload: dict[str, Any],
+            *,
+            _expert_index: int = expert_index,
+            _expert_name: str = expert_name,
+        ) -> None:
+            assert progress_flusher is not None
+            await progress_flusher.update_status(
+                expert_index=_expert_index,
+                status_entry=_build_expert_status_entry(
+                    expert_index=_expert_index,
+                    expert_name=_expert_name,
+                    status=str(status_payload.get("status") or "queued"),
+                    status_label=str(status_payload.get("status_label") or "Queued"),
+                    section_index=status_payload.get("section_index"),
+                    section_total=status_payload.get("section_total"),
+                    section_title=status_payload.get("section_title"),
+                ),
             )
 
         expert_tasks.append(
@@ -343,7 +631,7 @@ async def run_generate_content_for_perspectives(
                     expert_agent=expert_agent,
                     sections=sections,
                     saved_progress=saved_progress if isinstance(saved_progress, dict) else None,
-                    emit_progress=emit_progress,
+                    emit_expert_status=_emit_status_for_expert,
                     persist_progress=_persist_for_expert,
                 )
             )
