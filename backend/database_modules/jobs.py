@@ -103,6 +103,7 @@ class DatabaseJobsMixin:
             "status": "queued",
             "currentNode": "queued",
             "progressMessage": progress_message_for_node("queued"),
+            "progressDetails": None,
             "resumeFromNode": "generate_document_outline",
             "attempts": 0,
             "workerId": None,
@@ -489,6 +490,7 @@ class DatabaseJobsMixin:
         progress_message: str,
         status: str = "running",
         expected_worker_id: str | None = None,
+        progress_details: dict[str, Any] | None = None,
     ) -> bool:
         return await asyncio.to_thread(
             self._update_research_job_progress_sync,
@@ -497,6 +499,7 @@ class DatabaseJobsMixin:
             progress_message,
             status,
             expected_worker_id,
+            progress_details,
         )
 
     def _update_research_job_progress_sync(
@@ -506,6 +509,7 @@ class DatabaseJobsMixin:
         progress_message: str,
         status: str = "running",
         expected_worker_id: str | None = None,
+        progress_details: dict[str, Any] | None = None,
     ) -> bool:
         next_status = str(status or "running").strip().lower()
         if next_status not in {"queued", "running", "completed", "failed"}:
@@ -518,6 +522,7 @@ class DatabaseJobsMixin:
                 "status": next_status,
                 "currentNode": str(current_node or "").strip() or None,
                 "progressMessage": str(progress_message or "").strip() or None,
+                "progressDetails": progress_details if isinstance(progress_details, dict) else None,
                 "updatedAt": now,
             },
             expected_worker_id=expected_worker_id,
@@ -586,6 +591,7 @@ class DatabaseJobsMixin:
                 "status": "completed",
                 "currentNode": "completed",
                 "progressMessage": progress_message_for_node("completed"),
+                "progressDetails": None,
                 "resumeFromNode": None,
                 "updatedAt": now,
                 "completedAt": now,
@@ -632,6 +638,7 @@ class DatabaseJobsMixin:
                 "status": "failed",
                 "currentNode": "failed",
                 "progressMessage": progress_message_for_node("failed"),
+                "progressDetails": None,
                 "updatedAt": now,
                 "failedAt": now,
                 "workerId": None,
@@ -682,6 +689,7 @@ class DatabaseJobsMixin:
                 "status": "queued",
                 "currentNode": "queued",
                 "progressMessage": progress_message_for_node("queued"),
+                "progressDetails": None,
                 "resumeFromNode": normalized_resume,
                 "updatedAt": now,
                 "nextRunAt": next_run,
@@ -972,6 +980,7 @@ class DatabaseJobsMixin:
             "progressMessage": (
                 str(raw.get("progressMessage")) if raw.get("progressMessage") is not None else None
             ),
+            "progressDetails": raw.get("progressDetails") if isinstance(raw.get("progressDetails"), dict) else None,
             "resumeFromNode": (
                 str(raw.get("resumeFromNode")) if raw.get("resumeFromNode") is not None else None
             ),
