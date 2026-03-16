@@ -25,6 +25,15 @@ _CODE_FENCE_RE = re.compile(r"```[\s\S]*?```")
 _INLINE_CODE_RE = re.compile(r"`[^`]+`")
 
 
+def _is_escaped(text: str, index: int) -> bool:
+    backslash_count = 0
+    probe = index - 1
+    while probe >= 0 and text[probe] == "\\":
+        backslash_count += 1
+        probe -= 1
+    return (backslash_count % 2) == 1
+
+
 def _build_masked(text: str) -> str:
     """Return a char-for-char copy of *text* where every character that sits
     inside a code fence or inline-code span is replaced with the null byte
@@ -98,7 +107,7 @@ def extract_equation_spans(source: str) -> list[EquationSpan]:
                 continue
 
         # ── inline_dollar  $...$  (no real newline allowed) ─────────────────
-        if masked[i] == "$":
+        if masked[i] == "$" and not _is_escaped(masked, i):
             j = i + 1
             found_close = -1
             while j < n:
@@ -109,7 +118,7 @@ def extract_equation_spans(source: str) -> list[EquationSpan]:
                 if ch == "\x00":
                     j += 1
                     continue
-                if ch == "$":
+                if ch == "$" and not _is_escaped(masked, j):
                     found_close = j
                     break
                 j += 1
