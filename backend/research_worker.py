@@ -174,6 +174,7 @@ class ResearchBackgroundWorker:
             async def _progress(
                 node_name: str,
                 progress_message: str | None = None,
+                progress_details: dict[str, Any] | None = None,
             ) -> None:
                 nonlocal current_node_tracker
                 current_node_tracker = str(node_name or "").strip() or current_node_tracker
@@ -186,6 +187,7 @@ class ResearchBackgroundWorker:
                     ),
                     status="running",
                     expected_worker_id=self._worker_id,
+                    progress_details=progress_details,
                 )
                 if not still_owned:
                     raise ResearchOwnershipLostError(
