@@ -15,15 +15,19 @@ async def compact_final_summary(
     summary_model: Any,
     node_builder: Any,
     summary: str | None,
+    summary_timeout_seconds: float,
     run_config: dict[str, Any] | None = None,
 ) -> str | None:
     current_summary = str(summary or "").strip()
     if not current_summary:
         return summary
 
-    summary_message = await summary_model.ainvoke(
-        node_builder.generate_rolling_summary(current_summary),
-        config=run_config,
+    summary_message = await asyncio.wait_for(
+        summary_model.ainvoke(
+            node_builder.generate_rolling_summary(current_summary),
+            config=run_config,
+        ),
+        timeout=float(summary_timeout_seconds),
     )
     next_summary = message_text(summary_message).strip()
     return next_summary or current_summary
@@ -42,6 +46,7 @@ async def run_final_section_generation(
     resolve_repair_task: Any,
     summary_model: Any,
     node_builder: Any,
+    summary_timeout_seconds: float,
     run_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     await emit_progress("final_section_generation")
@@ -99,14 +104,30 @@ async def run_final_section_generation(
                 )
 
                 next_sections = [*completed_sections, final_section]
-                summary_message = await summary_model.ainvoke(
-                    node_builder.generate_rolling_summary(
-                        "\n".join([section_item.as_str for section_item in next_sections])
-                    ),
-                    config=run_config,
-                )
-                next_summary = message_text(summary_message).strip()
-                summary = next_summary or summary
+                try:
+                    summary_message = await asyncio.wait_for(
+                        summary_model.ainvoke(
+                            node_builder.generate_rolling_summary(
+                                "\n".join([section_item.as_str for section_item in next_sections])
+                            ),
+                            config=run_config,
+                        ),
+                        timeout=float(summary_timeout_seconds),
+                    )
+                    next_summary = message_text(summary_message).strip()
+                    summary = next_summary or summary
+                except asyncio.CancelledError:
+                    raise
+                except asyncio.TimeoutError:
+                    print(
+                        f"[graph] Final rolling summary timed out after "
+                        f"section '{section_title}'. Continuing with prior summary."
+                    )
+                except Exception as summary_error:
+                    print(
+                        f"[graph] Final rolling summary failed after section "
+                        f"'{section_title}': {summary_error}. Continuing with prior summary."
+                    )
                 completed_sections = next_sections
                 state["final_section_progress"] = {
                     "summary": summary or "",
@@ -129,11 +150,12 @@ async def run_final_section_generation(
                 if is_context_window_error(error):
                     try:
                         summary = await compact_final_summary(
-                            summary_model=summary_model,
-                            node_builder=node_builder,
-                            summary=summary,
-                            run_config=run_config,
-                        )
+                        summary_model=summary_model,
+                        node_builder=node_builder,
+                        summary=summary,
+                        summary_timeout_seconds=summary_timeout_seconds,
+                        run_config=run_config,
+                    )
                     except asyncio.CancelledError:
                         raise
                     except Exception as summary_error:
