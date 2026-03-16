@@ -5,6 +5,7 @@ from typing import Any
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
+from langgraph.checkpoint.memory import InMemorySaver
 
 from ..helpers import fallback_section_text
 
@@ -49,6 +50,7 @@ async def run_generate_content_for_perspectives(
     state: dict[str, Any],
     *,
     emit_progress: Any,
+    emit_state_checkpoint: Any,
     gpt_model: Any,
     gemini_model: Any,
     summary_model: Any,
@@ -63,8 +65,15 @@ async def run_generate_content_for_perspectives(
     await emit_progress("generate_content_for_perspectives")
     sections = list(state["document_outline"].sections)
     if len(sections) == 0:
+        state.pop("expert_progress", None)
         return {"perspective_content": []}
 
+    saved_expert_progress = (
+        state.get("expert_progress", {}).get("experts", {})
+        if isinstance(state.get("expert_progress"), dict)
+        else {}
+    )
+    checkpoint_lock = asyncio.Lock()
     expert_agents: list[tuple[int, str, object]] = []
     for index, expert in enumerate(state["perspectives"].experts):
         model = gpt_model if index % 2 == 0 else gemini_model
@@ -88,24 +97,62 @@ async def run_generate_content_for_perspectives(
             tools=tools,
             system_prompt=system_prompt,
             middleware=middleware,
+            checkpointer=InMemorySaver(),
         )
         expert_name = str(getattr(expert, "name", f"Expert {index + 1}") or f"Expert {index + 1}")
         expert_agents.append((index, expert_name, expert_agent))
 
     if len(expert_agents) == 0:
+        state.pop("expert_progress", None)
         return {"perspective_content": []}
 
-    expert_tasks = [
-        asyncio.create_task(
-            run_expert_pipeline(
-                expert_index=expert_index,
-                expert_name=expert_name,
-                expert_agent=expert_agent,
-                sections=sections,
+    async def _persist_expert_progress(
+        expert_index: int,
+        expert_name: str,
+        progress_payload: dict[str, Any],
+        progress_message: str,
+    ) -> None:
+        async with checkpoint_lock:
+            expert_progress_state = state.setdefault("expert_progress", {"experts": {}})
+            experts_state = expert_progress_state.setdefault("experts", {})
+            experts_state[str(expert_index)] = {
+                "expert_name": expert_name,
+                "summary": str(progress_payload.get("summary") or ""),
+                "section_results": list(progress_payload.get("section_results") or []),
+            }
+            await emit_progress("generate_content_for_perspectives", progress_message)
+            await emit_state_checkpoint(state, "generate_content_for_perspectives")
+
+    expert_tasks = []
+    for expert_index, expert_name, expert_agent in expert_agents:
+        saved_progress = saved_expert_progress.get(str(expert_index))
+        async def _persist_for_expert(
+            progress_payload: dict[str, Any],
+            progress_message: str,
+            *,
+            _expert_index: int = expert_index,
+            _expert_name: str = expert_name,
+        ) -> None:
+            await _persist_expert_progress(
+                _expert_index,
+                _expert_name,
+                progress_payload,
+                progress_message,
+            )
+
+        expert_tasks.append(
+            asyncio.create_task(
+                run_expert_pipeline(
+                    expert_index=expert_index,
+                    expert_name=expert_name,
+                    expert_agent=expert_agent,
+                    sections=sections,
+                    saved_progress=saved_progress if isinstance(saved_progress, dict) else None,
+                    emit_progress=emit_progress,
+                    persist_progress=_persist_for_expert,
+                )
             )
         )
-        for expert_index, expert_name, expert_agent in expert_agents
-    ]
 
     pipeline_results = await asyncio.gather(*expert_tasks, return_exceptions=True)
 
@@ -113,14 +160,9 @@ async def run_generate_content_for_perspectives(
     for result_index, result in enumerate(pipeline_results):
         if isinstance(result, Exception):
             failing_expert = expert_agents[result_index][1]
-            print(
-                f"[graph] Expert pipeline '{failing_expert}' crashed with: {result}. "
-                "Using fallback content for all sections."
-            )
-            expert_outputs.append(
-                [fallback_section_text(section.section_title) for section in sections]
-            )
-            continue
+            raise RuntimeError(
+                f"Expert pipeline '{failing_expert}' crashed unexpectedly."
+            ) from result
 
         normalized = list(result)
         if len(normalized) < len(sections):
@@ -142,7 +184,11 @@ async def run_generate_content_for_perspectives(
         for expert_index in range(len(expert_outputs)):
             value = expert_outputs[expert_index][section_index]
             text = str(value or "").strip()
-            row.append(text if text else fallback_section_text(section.section_title))
+            if text:
+                row.append(text)
+        if len(row) == 0:
+            row.append(fallback_section_text(section.section_title))
         perspective_content.append(row)
 
+    state.pop("expert_progress", None)
     return {"perspective_content": perspective_content}
