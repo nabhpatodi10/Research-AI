@@ -8,6 +8,11 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import ChartBlock from './ChartBlock';
 import MermaidBlock from './MermaidBlock';
+import {
+  normalizeMarkdownMath,
+  remarkExplicitInlineMath,
+  remarkSingleDollarCompat,
+} from './mathMarkdown';
 import './github-markdown-overrides.css'; // Optional custom overrides
 
 const sanitizeSchema = {
@@ -27,25 +32,6 @@ const sanitizeSchema = {
     code: [...(defaultSchema.attributes?.code || []), 'className'],
     pre: [...(defaultSchema.attributes?.pre || []), 'className'],
   },
-};
-
-const normalizeMathDelimiters = (value) => {
-  const text = String(value ?? '');
-  const normalizedBackslashDelimiters = text
-    .replace(/\\\[((?:.|\n)*?)\\\]/g, (_, expr) => `$$${expr}$$`)
-    .replace(/\\\((.+?)\\\)/gs, (_, expr) => `$${expr}$`);
-
-  const normalizedBracketLatex = normalizedBackslashDelimiters.replace(
-    /\[\s*(?=[^\]]*\\(?:frac|big|left|right|sum|int|cdot|times|sqrt|alpha|beta|gamma|theta|pi|begin|end))([\s\S]*?)\s*\]/g,
-    (_, expr) => `$$${expr.trim()}$$`
-  );
-
-  // Heuristic for common model output: chained inline equations without explicit delimiters.
-  // Example: U_i(x; v) = (...) = (...)
-  return normalizedBracketLatex.replace(
-    /([A-Za-z][A-Za-z0-9_]*\([^)\n]*\)\s*=\s*[^,\n=]+(?:=\s*[^,\n=]+)+)(?=\s+and\s+|\s*$|[.;:])/g,
-    (_, expr) => `$${expr.trim()}$`
-  );
 };
 
 const preserveUserLineBreaks = (value) =>
@@ -147,7 +133,7 @@ const normalizeEscapedAssistantContent = (value, variant) => {
 
 const MarkdownRenderer = ({ content, variant = 'assistant' }) => {
   const transportNormalizedContent = normalizeEscapedAssistantContent(content, variant);
-  const normalizedContent = normalizeMathDelimiters(transportNormalizedContent);
+  const normalizedContent = normalizeMarkdownMath(transportNormalizedContent);
   const renderedContent =
     variant === 'user' ? preserveUserLineBreaks(normalizedContent) : normalizedContent;
   const enableRichCodeBlocks = variant === 'assistant';
@@ -161,7 +147,12 @@ const MarkdownRenderer = ({ content, variant = 'assistant' }) => {
   return (
     <div className={`markdown-body ${variantClassName}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[
+          remarkGfm,
+          remarkExplicitInlineMath,
+          [remarkMath, { singleDollarTextMath: true }],
+          [remarkSingleDollarCompat, { source: renderedContent }],
+        ]}
         rehypePlugins={[
           [rehypeKatex, { output: 'html', throwOnError: false, strict: 'ignore' }],
           rehypeHighlight,

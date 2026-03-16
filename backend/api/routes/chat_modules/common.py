@@ -118,6 +118,7 @@ async def get_active_research_task(
 
     current_node = normalize_research_node(active_job.get("currentNode"))
     progress_message = str(active_job.get("progressMessage") or "").strip() or None
+    progress_details = active_job.get("progressDetails") if isinstance(active_job.get("progressDetails"), dict) else None
     await request.app.state.database.set_user_session_active_task(
         user_id=user_id,
         session_id=session_id,
@@ -127,6 +128,7 @@ async def get_active_research_task(
             "status": job_status,
             "current_node": current_node,
             "progress_message": progress_message,
+            "progress_details": progress_details,
         },
     )
 
@@ -136,4 +138,5 @@ async def get_active_research_task(
         "status": job_status,
         "current_node": current_node,
         "progress_message": progress_message,
+        "progress_details": progress_details,
     }

@@ -40,6 +40,11 @@ def _code_span_fallback(expression: str) -> str:
     return f"`{escaped}`"
 
 
+def _plaintext_dollar_fallback(full_match: str) -> str:
+    """Preserve suspicious single-dollar spans as plain text by escaping dollars."""
+    return str(full_match or "").replace("$", r"\$")
+
+
 def _build_delimited_equation(delimiter_style: str, expression: str) -> str:
     """Wrap *expression* back in its original delimiter style."""
     style = str(delimiter_style or "").strip().lower()
@@ -52,6 +57,35 @@ def _build_delimited_equation(delimiter_style: str, expression: str) -> str:
         return f"\\({expr}\\)"
     # Default: inline_dollar
     return f"${expr}$"
+
+
+def _prefer_plaintext_fallback(span: EquationSpan, reason: str) -> bool:
+    if span.delimiter_style != "inline_dollar":
+        return False
+    normalized_reason = str(reason or "").lower()
+    if any(
+        token in normalized_reason
+        for token in (
+            "dangling operator",
+            "unmatched closing delimiter",
+            "unclosed literal delimiter",
+            "mismatched literal delimiters",
+            "unescaped '$'",
+        )
+    ):
+        return True
+    expression = str(span.expression or "")
+    has_digits = any(ch.isdigit() for ch in expression)
+    has_latex_commands = "\\" in expression
+    has_script_tokens = "^" in expression or "_" in expression
+    has_unit_slash = "/" in expression and any(ch.isalpha() for ch in expression)
+    return has_digits and has_unit_slash and not has_latex_commands and not has_script_tokens
+
+
+def _fallback_replacement(span: EquationSpan, reason: str) -> str:
+    if _prefer_plaintext_fallback(span, reason):
+        return _plaintext_dollar_fallback(span.full_match)
+    return _code_span_fallback(span.expression)
 
 
 async def _validate_all_spans(
@@ -117,12 +151,15 @@ async def repair_section_equations(
     working_content = str(section.content or "")
     citations = list(section.citations or [])
     section_title = str(section.section_title or "").strip() or "Untitled Section"
+    equation_tier2_fail_open = bool(tier2_fail_open)
+    if bool(tier2_enabled):
+        equation_tier2_fail_open = False
 
     initial_report = await _validate_all_spans(
         working_content,
         tier2_validator=tier2_validator,
         tier2_enabled=tier2_enabled,
-        tier2_fail_open=tier2_fail_open,
+        tier2_fail_open=equation_tier2_fail_open,
         equation_max_chars=equation_max_chars,
     )
 
@@ -147,7 +184,7 @@ async def repair_section_equations(
         original_span = invalid.span
         repaired = False
 
-        if repair_attempt_budget > 0:
+        if repair_attempt_budget > 0 and not _prefer_plaintext_fallback(original_span, invalid.reason):
             for attempt in range(1, repair_attempt_budget + 1):
                 repair_prompt = node_builder.repair_equation_prompt(
                     delimiter_style=original_span.delimiter_style,
@@ -175,7 +212,7 @@ async def repair_section_equations(
                         candidate_span,
                         tier2_validator=tier2_validator,
                         tier2_enabled=tier2_enabled,
-                        tier2_fail_open=tier2_fail_open,
+                        tier2_fail_open=equation_tier2_fail_open,
                         equation_max_chars=equation_max_chars,
                     )
                     if not candidate_result.is_valid:
@@ -204,13 +241,33 @@ async def repair_section_equations(
                     )
 
         if not repaired:
-            # Fall back: replace broken equation with inline code span so prose
-            # is never silently deleted.
+            # Preserve prose-like false positives as text, and downgrade real
+            # broken equations to inline code.
             working_content = _replace_span(
                 working_content,
                 original_span.start,
                 original_span.end,
-                _code_span_fallback(original_span.expression),
+                _fallback_replacement(original_span, invalid.reason),
+            )
+
+    final_report = await _validate_all_spans(
+        working_content,
+        tier2_validator=tier2_validator,
+        tier2_enabled=tier2_enabled,
+        tier2_fail_open=equation_tier2_fail_open,
+        equation_max_chars=equation_max_chars,
+    )
+    if final_report.invalid_spans:
+        for invalid in sorted(
+            final_report.invalid_spans,
+            key=lambda item: item.span.start,
+            reverse=True,
+        ):
+            working_content = _replace_span(
+                working_content,
+                invalid.span.start,
+                invalid.span.end,
+                _fallback_replacement(invalid.span, invalid.reason),
             )
 
     return ContentSection(

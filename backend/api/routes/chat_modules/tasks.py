@@ -45,6 +45,9 @@ async def get_task_status(
         session_id=session_id,
         current_node=normalize_research_node(job.get("currentNode")),
         progress_message=(str(job.get("progressMessage") or "").strip() or None),
+        progress_details=(
+            job.get("progressDetails") if isinstance(job.get("progressDetails"), dict) else None
+        ),
         result=result_text or None,
         error=error_message,
     )

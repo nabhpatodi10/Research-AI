@@ -1,11 +1,13 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../context/useAuth';
+import GitHubStarButton from './GitHubStarButton';
 
 export default function Navbar() {
   const { currentUser, logout } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const location = useLocation();
+  const isHomePage = location.pathname === '/';
 
   const sectionHref = (sectionId) => (location.pathname === '/' ? `#${sectionId}` : `/#${sectionId}`);
 
@@ -37,6 +39,7 @@ export default function Navbar() {
           </div>
 
           <div className="hidden md:flex items-center space-x-2">
+            {isHomePage && <GitHubStarButton variant="navbar" />}
             {currentUser ? (
               <>
                 <Link to="/chat" className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:text-blue-900">
@@ -112,6 +115,11 @@ export default function Navbar() {
                 <Link to="/feedback" className="rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-900" onClick={() => setIsMenuOpen(false)}>
                   Feedback
                 </Link>
+                {isHomePage && (
+                  <div className="px-3 py-2">
+                    <GitHubStarButton variant="navbar" />
+                  </div>
+                )}
                 {currentUser ? (
                   <>
                     <Link to="/chat" className="rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-900" onClick={() => setIsMenuOpen(false)}>

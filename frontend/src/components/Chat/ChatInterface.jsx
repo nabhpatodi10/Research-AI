@@ -209,12 +209,13 @@ export default function ChatInterface() {
   }, []);
 
   const handleTaskProgressInActiveSession = useCallback(
-    ({ sessionId: taskSessionId, pendingMessageId, progressText }) => {
+    ({ sessionId: taskSessionId, pendingMessageId, progressText, progressDetails }) => {
       dispatch({
         type: 'TASK_PROGRESS',
         sessionId: taskSessionId,
         pendingMessageId,
         progressText,
+        progressDetails,
       });
     },
     []
@@ -551,6 +552,7 @@ export default function ChatInterface() {
           pendingMessageId: normalizedPendingMessageId,
           currentNode: payload?.task?.current_node,
           progressMessage: payload?.task?.progress_message,
+          progressDetails: payload?.task?.progress_details,
         });
 
         if (sessionIdRef.current === targetSessionId) {
@@ -560,6 +562,7 @@ export default function ChatInterface() {
             sessionId: targetSessionId,
             pendingMessageId: normalizedPendingMessageId,
             progressText,
+            progressDetails: payload?.task?.progress_details || null,
           });
         }
 
@@ -684,13 +687,20 @@ export default function ChatInterface() {
 
   const sessionTaskStatusLabel = useMemo(() => {
     if (!hasActiveResearchTaskForCurrentSession) return '';
+    const activeProgressSummary = String(activeSessionTask?.progressDetails?.summaryText || '').trim();
+    if (activeProgressSummary) return activeProgressSummary;
     const activeProgressMessage = String(activeSessionTask?.progressMessage || '').trim();
     if (activeProgressMessage) return activeProgressMessage;
     if (String(activeSessionTask?.status || '').toLowerCase() === 'queued') {
       return 'Research queued';
     }
     return 'Research running';
-  }, [activeSessionTask?.progressMessage, activeSessionTask?.status, hasActiveResearchTaskForCurrentSession]);
+  }, [
+    activeSessionTask?.progressDetails?.summaryText,
+    activeSessionTask?.progressMessage,
+    activeSessionTask?.status,
+    hasActiveResearchTaskForCurrentSession,
+  ]);
 
   return (
     <ChatLayout>

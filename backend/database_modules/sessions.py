@@ -30,12 +30,17 @@ class DatabaseSessionsMixin:
         progress_message = (
             str(raw.get("progress_message") or raw.get("progressMessage") or "").strip() or None
         )
+        raw_progress_details = raw.get("progress_details")
+        if not isinstance(raw_progress_details, dict):
+            raw_progress_details = raw.get("progressDetails")
+        progress_details = raw_progress_details if isinstance(raw_progress_details, dict) else None
         return {
             "id": task_id,
             "type": "research",
             "status": status,
             "current_node": current_node,
             "progress_message": progress_message,
+            "progress_details": progress_details,
             "createdAt": created_at,
             "updatedAt": updated_at,
         }
@@ -51,6 +56,7 @@ class DatabaseSessionsMixin:
             "status": normalized["status"],
             "current_node": normalized.get("current_node"),
             "progress_message": normalized.get("progress_message"),
+            "progress_details": normalized.get("progress_details"),
             "createdAt": cls._datetime_iso(normalized.get("createdAt")),
             "updatedAt": cls._datetime_iso(normalized.get("updatedAt")),
         }

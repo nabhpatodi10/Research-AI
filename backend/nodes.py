@@ -72,8 +72,11 @@ Response expectations:
 - Use equations and LaTex formatting when you are presenting mathematical or any kind of equations in the content.
 
 Equations and LaTex:
-- Equations must use exactly one delimiter style: $...$, $$...$$, \\(...\\), or \\[...\\].
-- Never nest math delimiters (e.g., no $$...$$ inside $...$ or inside \\[...\\]).
+- Prefer \\(...\\) for inline math and \\[...\\] or $$...$$ for display math.
+- Avoid raw $...$ for new content unless absolutely necessary for compatibility.
+- Never nest math delimiters (e.g., no $$...$$ inside \\(...\\) or inside \\[...\\]).
+- Keep currency and other prose values outside math when possible, preferably as `USD 7,800` or `US$156/kWh`.
+- If a literal dollar sign must appear inside math, escape it as \\$.
 - If using \\left, always close with \\right; if using \\Big, it must size a delimiter like [ ( | or .
 - Before final output, ensure math brackets/parentheses are balanced and delimiters are not nested.
 
@@ -113,8 +116,11 @@ Response expectations:
 - Do not add citations in between the content, add citations in the citations part of the output.
 
 Equations and LaTex:
-- Equations must use exactly one delimiter style: $...$, $$...$$, \\(...\\), or \\[...\\].
-- Never nest math delimiters (e.g., no $$...$$ inside $...$ or inside \\[...\\]).
+- Prefer \\(...\\) for inline math and \\[...\\] or $$...$$ for display math.
+- Avoid raw $...$ for new content unless absolutely necessary for compatibility.
+- Never nest math delimiters (e.g., no $$...$$ inside \\(...\\) or inside \\[...\\]).
+- Keep currency and other prose values outside math when possible, preferably as `USD 7,800` or `US$156/kWh`.
+- If a literal dollar sign must appear inside math, escape it as \\$.
 - If using \\left, always close with \\right; if using \\Big, it must size a delimiter like [ ( | or .
 - Before final output, ensure math brackets/parentheses are balanced and delimiters are not nested.
 
@@ -368,8 +374,10 @@ Escalation and safety:
                     "2) Output only the corrected expression content, without any delimiters. "
                     "3) If the equation cannot be safely repaired, return an empty response. "
                     "4) Preserve the mathematical meaning of the original expression as closely as possible. "
-                    "5) Ensure \\left/\\right pairs are balanced. "
-                    "6) Ensure \\begin{env}/\\end{env} environments are properly opened and closed."
+                    "5) Prefer \\(...\\) semantics for inline math and \\[...\\] / $$...$$ semantics for display math. "
+                    "6) Keep currency in prose when possible; if a literal dollar sign must appear inside math, escape it as \\$. "
+                    "7) Ensure \\left/\\right pairs are balanced. "
+                    "8) Ensure \\begin{env}/\\end{env} environments are properly opened and closed."
                 )
             ),
             HumanMessage(
