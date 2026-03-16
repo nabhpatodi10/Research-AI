@@ -1,4 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { buildPendingResearchView } from '../researchProgress';
 
 const RichAssistantMessage = lazy(() => import('../RichAssistantMessage'));
 const MarkdownRenderer = lazy(() => import('../MarkdownRenderer'));
@@ -62,15 +63,36 @@ function AnimatedPendingText({ text }) {
 function MessageBubble({ msg }) {
   if (msg.status === 'pending') {
     const progressText = String(msg.text || '').trim();
+    const pendingView = buildPendingResearchView(progressText, msg.progressDetails || null);
     return (
       <div className="max-w-full rounded-2xl border border-blue-200 bg-white px-4 py-3 shadow-sm md:max-w-[78%]">
-        <div className="flex items-center gap-2">
+        <div className="flex items-start gap-2">
           <div className="inline-flex shrink-0 items-center gap-1.5 self-center">
             <span className="h-2 w-2 rounded-full bg-blue-900 animate-bounce [animation-delay:-0.2s]" />
             <span className="h-2 w-2 rounded-full bg-blue-900 animate-bounce [animation-delay:-0.1s]" />
             <span className="h-2 w-2 rounded-full bg-blue-900 animate-bounce" />
           </div>
-          <AnimatedPendingText text={progressText} />
+          {pendingView.kind === 'expert_progress' ? (
+            <div className="min-w-0 flex-1">
+              {pendingView.summaryText ? (
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+                  {pendingView.summaryText}
+                </p>
+              ) : null}
+              <ul className="mt-1 space-y-1">
+                {pendingView.expertLines.map((line, index) => (
+                  <li
+                    key={`${index}-${line}`}
+                    className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700"
+                  >
+                    {line}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <AnimatedPendingText text={pendingView.text} />
+          )}
         </div>
       </div>
     );

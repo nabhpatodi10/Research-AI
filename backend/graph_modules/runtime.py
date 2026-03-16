@@ -73,6 +73,29 @@ class ResearchGraph:
         )
         self.__summary_model = ChatGoogleGenerativeAI(model="models/gemini-flash-lite-latest")
         self.__progress_callback = progress_callback
+        self.__callback_timeout_seconds = max(
+            1.0,
+            float(settings.research_callback_timeout_seconds),
+        )
+        self.__summary_timeout_seconds = max(
+            1.0,
+            float(settings.research_summary_timeout_seconds),
+        )
+        self.__expert_context_summarization_enabled = bool(
+            settings.expert_context_summarization_enabled
+        )
+        self.__expert_context_summary_trigger_tokens = max(
+            1,
+            int(settings.expert_context_summary_trigger_tokens),
+        )
+        self.__expert_context_summary_keep_messages = max(
+            1,
+            int(settings.expert_context_summary_keep_messages),
+        )
+        self.__expert_context_summary_trim_tokens_to_summarize = max(
+            1,
+            int(settings.expert_context_summary_trim_tokens_to_summarize),
+        )
         self.__final_content_model = ChatOpenAI(
             model=gpt_model_name,
             reasoning={"effort": "high"},
@@ -135,14 +158,26 @@ class ResearchGraph:
     ) -> str | None:
         return resolve_resume_node(cls.NODE_SEQUENCE, requested_node, state)
 
-    async def __emit_progress(self, node_name: str) -> None:
-        await emit_progress(self.__progress_callback, node_name)
+    async def __emit_progress(
+        self,
+        node_name: str,
+        progress_message: str | None = None,
+        progress_details: dict[str, Any] | None = None,
+    ) -> None:
+        await emit_progress(
+            self.__progress_callback,
+            node_name,
+            progress_message,
+            progress_details,
+            timeout_seconds=self.__callback_timeout_seconds,
+        )
 
     async def __emit_state_checkpoint(
         self,
         callback: Any,
         completed_node: str,
         state: dict[str, Any],
+        resume_from_node: str | None = None,
     ) -> None:
         await emit_state_checkpoint(
             callback,
@@ -150,6 +185,8 @@ class ResearchGraph:
             state=state,
             serialize_state=self.serialize_graph_state,
             next_node_after=self._next_node_after,
+            resume_from_node=resume_from_node,
+            timeout_seconds=self.__callback_timeout_seconds,
         )
 
     async def run_resumable(
@@ -170,8 +207,18 @@ class ResearchGraph:
         run_map = {
             "generate_document_outline": self.__generate_document_outline,
             "generate_perspectives": self.__generate_perspectives,
-            "generate_content_for_perspectives": self.__generate_content_for_perspectives,
-            "final_section_generation": self.__final_section_generation,
+            "generate_content_for_perspectives": lambda current_state: (
+                self.__generate_content_for_perspectives(
+                    current_state,
+                    checkpoint_callback=checkpoint_callback,
+                )
+            ),
+            "final_section_generation": lambda current_state: (
+                self.__final_section_generation(
+                    current_state,
+                    checkpoint_callback=checkpoint_callback,
+                )
+            ),
         }
 
         should_run = False
@@ -199,16 +246,28 @@ class ResearchGraph:
         expert_name: str,
         expert_agent: object,
         sections: list,
+        saved_progress: dict[str, Any] | None = None,
+        emit_expert_status: Any = None,
+        persist_progress: Any = None,
     ) -> list[str]:
         return await run_expert_pipeline(
             expert_index=expert_index,
             expert_name=expert_name,
             expert_agent=expert_agent,
             sections=sections,
+            saved_progress=saved_progress,
+            emit_expert_status=emit_expert_status,
+            persist_progress=persist_progress,
             summary_model=self.__summary_model,
             node_builder=self.__node,
             section_retry_delays=self.__section_retry_delays,
             section_attempt_timeout_seconds=self.__section_attempt_timeout_seconds,
+            section_context_trigger_tokens=self.__expert_context_summary_trigger_tokens,
+            section_context_keep_messages=self.__expert_context_summary_keep_messages,
+            section_context_trim_tokens_to_summarize=(
+                self.__expert_context_summary_trim_tokens_to_summarize
+            ),
+            summary_timeout_seconds=self.__summary_timeout_seconds,
             run_config=self.__thread_config,
         )
 
@@ -284,24 +343,65 @@ class ResearchGraph:
             run_config=self.__thread_config,
         )
 
-    async def __generate_content_for_perspectives(self, state: graphSchema):
+    async def __generate_content_for_perspectives(
+        self,
+        state: graphSchema,
+        checkpoint_callback: Any = None,
+    ):
+        async def _checkpoint_node(
+            current_state: dict[str, Any],
+            node_name: str,
+            resume_from_node: str | None = None,
+        ) -> None:
+            await self.__emit_state_checkpoint(
+                callback=checkpoint_callback,
+                completed_node=node_name,
+                state=current_state,
+                resume_from_node=resume_from_node or node_name,
+            )
+
         return await run_generate_content_for_perspectives(
             state,
             emit_progress=self.__emit_progress,
+            emit_state_checkpoint=_checkpoint_node,
             gpt_model=self.__gpt_model,
             gemini_model=self.__gemini_model,
             node_builder=self.__node,
             tools=self.__tools,
             run_expert_pipeline=self.__run_expert_pipeline,
+            summary_model=self.__summary_model,
+            expert_context_summarization_enabled=self.__expert_context_summarization_enabled,
+            expert_context_summary_trigger_tokens=self.__expert_context_summary_trigger_tokens,
+            expert_context_summary_keep_messages=self.__expert_context_summary_keep_messages,
+            expert_context_summary_trim_tokens_to_summarize=(
+                self.__expert_context_summary_trim_tokens_to_summarize
+            ),
         )
 
     def __build_low_breadth_document(self, state: graphSchema):
         return build_low_breadth_document(state)
 
-    async def __final_section_generation(self, state: graphSchema):
+    async def __final_section_generation(
+        self,
+        state: graphSchema,
+        checkpoint_callback: Any = None,
+    ):
+        async def _checkpoint_node(
+            current_state: dict[str, Any],
+            node_name: str,
+            resume_from_node: str | None = None,
+        ) -> None:
+            await self.__emit_state_checkpoint(
+                callback=checkpoint_callback,
+                completed_node=node_name,
+                state=current_state,
+                resume_from_node=resume_from_node or node_name,
+            )
+
         return await run_final_section_generation(
             state,
             emit_progress=self.__emit_progress,
+            emit_state_checkpoint=_checkpoint_node,
             research_breadth=self.__research_breadth,
             build_low_breadth_document=self.__build_low_breadth_document,
             generate_final_section=self.__generate_final_section,
@@ -310,5 +410,6 @@ class ResearchGraph:
             resolve_repair_task=self.__resolve_repair_task,
             summary_model=self.__summary_model,
             node_builder=self.__node,
+            summary_timeout_seconds=self.__summary_timeout_seconds,
             run_config=self.__thread_config,
         )

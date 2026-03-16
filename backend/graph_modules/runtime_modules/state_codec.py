@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from structures import CompleteDocument, Outline, Perspectives
+from structures import CompleteDocument, ContentSection, Outline, Perspectives
 
 
 def normalize_nested_string_rows(value: Any) -> list[list[str]] | None:
@@ -49,6 +49,74 @@ def safe_document(value: Any) -> CompleteDocument | None:
         return None
 
 
+def safe_content_section(value: Any) -> ContentSection | None:
+    if isinstance(value, ContentSection):
+        return value
+    if not isinstance(value, dict):
+        return None
+    try:
+        return ContentSection.model_validate(value)
+    except Exception:
+        return None
+
+
+def normalize_expert_progress(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    raw_experts = value.get("experts")
+    if not isinstance(raw_experts, dict):
+        return None
+
+    normalized_experts: dict[str, Any] = {}
+    for raw_key, raw_entry in raw_experts.items():
+        if not isinstance(raw_entry, dict):
+            continue
+        raw_results = raw_entry.get("section_results")
+        if not isinstance(raw_results, list):
+            continue
+
+        section_results: list[dict[str, str]] = []
+        for raw_result in raw_results:
+            if not isinstance(raw_result, dict):
+                continue
+            status = str(raw_result.get("status") or "completed").strip().lower()
+            if status not in {"completed", "skipped"}:
+                status = "completed"
+            section_results.append(
+                {
+                    "status": status,
+                    "content": str(raw_result.get("content") or ""),
+                }
+            )
+
+        normalized_experts[str(raw_key)] = {
+            "expert_name": str(raw_entry.get("expert_name") or "").strip(),
+            "summary": str(raw_entry.get("summary") or ""),
+            "section_results": section_results,
+        }
+
+    return {"experts": normalized_experts}
+
+
+def normalize_final_section_progress(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    raw_sections = value.get("completed_sections")
+    if not isinstance(raw_sections, list):
+        return None
+
+    completed_sections: list[ContentSection] = []
+    for raw_section in raw_sections:
+        section = safe_content_section(raw_section)
+        if section is not None:
+            completed_sections.append(section)
+
+    return {
+        "summary": str(value.get("summary") or ""),
+        "completed_sections": completed_sections,
+    }
+
+
 def deserialize_graph_state(graph_state: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(graph_state, dict):
         return {}
@@ -76,6 +144,22 @@ def deserialize_graph_state(graph_state: dict[str, Any] | None) -> dict[str, Any
     if final_document is not None:
         next_state["final_document"] = final_document
 
+    expert_progress = normalize_expert_progress(graph_state.get("expert_progress"))
+    if expert_progress is None:
+        expert_progress = normalize_expert_progress(graph_state.get("expertProgress"))
+    if expert_progress is not None:
+        next_state["expert_progress"] = expert_progress
+
+    final_section_progress = normalize_final_section_progress(
+        graph_state.get("final_section_progress")
+    )
+    if final_section_progress is None:
+        final_section_progress = normalize_final_section_progress(
+            graph_state.get("finalSectionProgress")
+        )
+    if final_section_progress is not None:
+        next_state["final_section_progress"] = final_section_progress
+
     return next_state
 
 
@@ -98,6 +182,21 @@ def serialize_graph_state(state: dict[str, Any]) -> dict[str, Any]:
     final_document = safe_document(state.get("final_document"))
     if final_document is not None:
         payload["final_document"] = final_document.model_dump(mode="json")
+
+    expert_progress = normalize_expert_progress(state.get("expert_progress"))
+    if expert_progress is not None:
+        payload["expert_progress"] = expert_progress
+
+    final_section_progress = normalize_final_section_progress(state.get("final_section_progress"))
+    if final_section_progress is not None:
+        payload["final_section_progress"] = {
+            "summary": str(final_section_progress.get("summary") or ""),
+            "completed_sections": [
+                section.model_dump(mode="json")
+                for section in final_section_progress.get("completed_sections", [])
+                if isinstance(section, ContentSection)
+            ],
+        }
 
     return payload
 

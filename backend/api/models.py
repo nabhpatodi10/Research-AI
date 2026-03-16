@@ -3,6 +3,23 @@ from typing import Literal
 from pydantic import BaseModel
 
 
+class ExpertProgressItem(BaseModel):
+    index: int
+    name: str
+    status: str
+    status_label: str
+    section_index: int | None = None
+    section_total: int | None = None
+    section_title: str | None = None
+    display_text: str
+
+
+class ResearchProgressDetails(BaseModel):
+    kind: Literal["expert_progress"]
+    summary_text: str
+    experts: list[ExpertProgressItem]
+
+
 class SessionUser(BaseModel):
     id: str
     email: str
@@ -69,6 +86,7 @@ class SessionTask(BaseModel):
     status: Literal["queued", "running", "completed", "failed"]
     current_node: str | None = None
     progress_message: str | None = None
+    progress_details: ResearchProgressDetails | None = None
 
 
 class ChatMessagesResponse(BaseModel):
@@ -128,5 +146,6 @@ class TaskStatusResponse(BaseModel):
     session_id: str
     current_node: str | None = None
     progress_message: str | None = None
+    progress_details: ResearchProgressDetails | None = None
     result: str | None = None
     error: str | None = None

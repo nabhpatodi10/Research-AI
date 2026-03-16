@@ -102,6 +102,16 @@ class Settings:
     research_background_poll_interval_seconds: float
     research_background_batch_size: int
     research_background_max_retries: int
+    research_callback_timeout_seconds: float
+    research_summary_timeout_seconds: float
+    research_job_heartbeat_interval_seconds: float
+    research_job_lease_duration_seconds: float
+    research_job_stale_warning_seconds: float
+    research_job_stale_timeout_seconds: float
+    expert_context_summarization_enabled: bool
+    expert_context_summary_trigger_tokens: int
+    expert_context_summary_keep_messages: int
+    expert_context_summary_trim_tokens_to_summarize: int
     visual_repair_enabled: bool
     visual_repair_max_retries: int
     visual_repair_retry_timeout_seconds: float
@@ -178,6 +188,46 @@ def get_settings() -> Settings:
         ),
         research_background_batch_size=_env_int("RESEARCH_BACKGROUND_BATCH_SIZE", 8),
         research_background_max_retries=_env_int("RESEARCH_BACKGROUND_MAX_RETRIES", 2),
+        research_callback_timeout_seconds=_env_float(
+            "RESEARCH_CALLBACK_TIMEOUT_SECONDS",
+            15.0,
+        ),
+        research_summary_timeout_seconds=_env_float(
+            "RESEARCH_SUMMARY_TIMEOUT_SECONDS",
+            120.0,
+        ),
+        research_job_heartbeat_interval_seconds=_env_float(
+            "RESEARCH_JOB_HEARTBEAT_INTERVAL_SECONDS",
+            60.0,
+        ),
+        research_job_lease_duration_seconds=_env_float(
+            "RESEARCH_JOB_LEASE_DURATION_SECONDS",
+            180.0,
+        ),
+        research_job_stale_warning_seconds=_env_float(
+            "RESEARCH_JOB_STALE_WARNING_SECONDS",
+            300.0,
+        ),
+        research_job_stale_timeout_seconds=_env_float(
+            "RESEARCH_JOB_STALE_TIMEOUT_SECONDS",
+            1200.0,
+        ),
+        expert_context_summarization_enabled=_env_bool(
+            "EXPERT_CONTEXT_SUMMARIZATION_ENABLED",
+            True,
+        ),
+        expert_context_summary_trigger_tokens=max(
+            1,
+            _env_int("EXPERT_CONTEXT_SUMMARY_TRIGGER_TOKENS", 350_000),
+        ),
+        expert_context_summary_keep_messages=max(
+            1,
+            _env_int("EXPERT_CONTEXT_SUMMARY_KEEP_MESSAGES", 10),
+        ),
+        expert_context_summary_trim_tokens_to_summarize=max(
+            1,
+            _env_int("EXPERT_CONTEXT_SUMMARY_TRIM_TOKENS_TO_SUMMARIZE", 350_000),
+        ),
         visual_repair_enabled=_env_bool("VISUAL_REPAIR_ENABLED", True),
         visual_repair_max_retries=_env_int("VISUAL_REPAIR_MAX_RETRIES", 2),
         visual_repair_retry_timeout_seconds=_env_float(

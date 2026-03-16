@@ -190,6 +190,7 @@ async def chat_endpoint(
                     "status": "queued",
                     "current_node": "queued",
                     "progress_message": progress_message_for_node("queued"),
+                    "progress_details": None,
                 },
             )
             return ChatResponseTask(
@@ -201,6 +202,7 @@ async def chat_endpoint(
                     status="queued",
                     current_node="queued",
                     progress_message=progress_message_for_node("queued"),
+                    progress_details=None,
                 ),
             )
 
