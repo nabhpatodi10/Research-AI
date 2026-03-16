@@ -186,12 +186,27 @@ async def validate_equation_async(
         return primary_result
 
     if not tier2_enabled or tier2_validator is None:
+        if tier2_enabled and tier2_validator is None and not tier2_fail_open:
+            return ValidationResult(
+                False,
+                "KaTeX Tier-2 validator is unavailable.",
+            )
         return primary_result
 
     display_mode = span.delimiter_style in ("block_dollar", "block_bracket")
-    status, reason = await tier2_validator.validate_equation(
-        span.expression, display_mode=display_mode
-    )
+    try:
+        status, reason = await tier2_validator.validate_equation(
+            span.expression, display_mode=display_mode
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:
+        if tier2_fail_open:
+            return primary_result
+        return ValidationResult(
+            False,
+            f"KaTeX Tier-2 validator crashed: {error}",
+        )
 
     if status == "valid":
         return primary_result
