@@ -4,26 +4,48 @@ import asyncio
 import inspect
 from typing import Any
 
+from .errors import ResearchOwnershipLostError
+
+
+async def _resolve_callback_result(
+    maybe_result: Any,
+    *,
+    timeout_seconds: float | None,
+) -> Any:
+    if not inspect.isawaitable(maybe_result):
+        return maybe_result
+    if timeout_seconds is None or timeout_seconds <= 0:
+        return await maybe_result
+    return await asyncio.wait_for(maybe_result, timeout=float(timeout_seconds))
+
 
 async def emit_progress(
     progress_callback: Any,
     node_name: str,
     progress_message: str | None = None,
-) -> None:
+    timeout_seconds: float | None = None,
+) -> bool:
     if progress_callback is None:
-        return
+        return True
     try:
         try:
             maybe_result = progress_callback(node_name, progress_message)
         except TypeError:
             maybe_result = progress_callback(node_name)
-        if inspect.isawaitable(maybe_result):
-            await maybe_result
+        result = await _resolve_callback_result(
+            maybe_result,
+            timeout_seconds=timeout_seconds,
+        )
+        return result is not False
+    except ResearchOwnershipLostError:
+        raise
     except asyncio.CancelledError:
         raise
+    except asyncio.TimeoutError:
+        return False
     except Exception:
         # Progress events must never break the research pipeline.
-        return
+        return False
 
 
 async def emit_state_checkpoint(
@@ -34,9 +56,10 @@ async def emit_state_checkpoint(
     serialize_state: Any,
     next_node_after: Any,
     resume_from_node: str | None = None,
-) -> None:
+    timeout_seconds: float | None = None,
+) -> bool:
     if checkpoint_callback is None:
-        return
+        return True
     try:
         maybe_result = checkpoint_callback(
             completed_node,
@@ -45,10 +68,17 @@ async def emit_state_checkpoint(
             if resume_from_node is None
             else str(resume_from_node or "").strip() or None,
         )
-        if inspect.isawaitable(maybe_result):
-            await maybe_result
+        result = await _resolve_callback_result(
+            maybe_result,
+            timeout_seconds=timeout_seconds,
+        )
+        return result is not False
+    except ResearchOwnershipLostError:
+        raise
     except asyncio.CancelledError:
         raise
+    except asyncio.TimeoutError:
+        return False
     except Exception:
         # Checkpoint events must never break the research pipeline.
-        return
+        return False
