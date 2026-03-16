@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import katex from 'katex';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
@@ -22,6 +23,14 @@ function runTree(source) {
   return processor.runSync(tree);
 }
 
+function runNormalizedTree(source) {
+  const normalized = normalizeMarkdownMath(source);
+  return {
+    normalized,
+    tree: runTree(normalized),
+  };
+}
+
 function collectNodeTypes(tree) {
   const types = [];
   const walk = (node) => {
@@ -39,6 +48,25 @@ function collectNodeTypes(tree) {
   };
   walk(tree);
   return types;
+}
+
+function collectNodesByType(tree, expectedType) {
+  const nodes = [];
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') {
+      return;
+    }
+    if (node.type === expectedType) {
+      nodes.push(node);
+    }
+    if (Array.isArray(node.children)) {
+      for (const child of node.children) {
+        walk(child);
+      }
+    }
+  };
+  walk(tree);
+  return nodes;
 }
 
 test('preserves valid legacy single-dollar inline math', () => {
@@ -65,12 +93,82 @@ test('normalizes explicit delimiters without manufacturing single-dollar math', 
   assert.match(normalized, /\$\$\s*x\^2\s*\$\$/);
 });
 
+test('keeps explicit display equations out of the standalone equation heuristic', () => {
+  const normalized = normalizeMarkdownMath(
+    String.raw`\[
+m = \frac{M\cdot Q}{z\cdot F} = \frac{M\cdot I t}{z\cdot F},
+\]`
+  );
+  assert.match(normalized, /\$\$\s*m = \\frac{M\\cdot Q}{z\\cdot F} = \\frac{M\\cdot I t}{z\\cdot F},\s*\$\$/s);
+  assert.doesNotMatch(normalized, /\$\$\s*\\\(/s);
+  assert.doesNotMatch(normalized, /\\\)\s*\$\$/s);
+});
+
+test('full markdown pipeline keeps the stored backend display equation renderable', () => {
+  const { normalized, tree } = runNormalizedTree(
+    String.raw`\[
+m = \frac{M\cdot Q}{z\cdot F} = \frac{M\cdot I t}{z\cdot F},
+\]`
+  );
+  assert.doesNotMatch(normalized, /\$\$\s*\\\(/s);
+
+  const mathNodes = collectNodesByType(tree, 'math');
+  assert.equal(mathNodes.length, 1);
+  assert.equal(
+    mathNodes[0].value.trim(),
+    String.raw`m = \frac{M\cdot Q}{z\cdot F} = \frac{M\cdot I t}{z\cdot F},`
+  );
+  assert.doesNotThrow(() =>
+    katex.renderToString(mathNodes[0].value, {
+      displayMode: true,
+      throwOnError: true,
+      strict: 'error',
+    })
+  );
+});
+
 test('standalone equation heuristic wraps only standalone equation-like lines', () => {
   const normalized = normalizeMarkdownMath(
     ['U_i(x; v) = a = b', 'The value U_i(x; v) = a = b appears inside prose.'].join('\n')
   );
   assert.match(normalized, /^\\\(U_i\(x; v\) = a = b\\\)$/m);
   assert.doesNotMatch(normalized, /The value .*\\\(/);
+});
+
+test('legacy malformed nested inline math is canonicalized and still renders', () => {
+  const { normalized, tree } = runNormalizedTree(String.raw`Legacy inline $\(a+b\)$ math.`);
+  assert.equal(normalized, 'Legacy inline $a+b$ math.');
+
+  const mathNodes = collectNodesByType(tree, 'inlineMath');
+  assert.equal(mathNodes.length, 1);
+  assert.equal(mathNodes[0].value, 'a+b');
+  assert.doesNotThrow(() =>
+    katex.renderToString(mathNodes[0].value, {
+      displayMode: false,
+      throwOnError: true,
+      strict: 'error',
+    })
+  );
+});
+
+test('legacy malformed nested display math is canonicalized to a display block', () => {
+  const { normalized, tree } = runNormalizedTree(String.raw`$$\(a+b\)$$`);
+  assert.match(normalized, /\$\$\s*a\+b\s*\$\$/s);
+  assert.doesNotMatch(normalized, /\\\(/);
+
+  const mathNodes = collectNodesByType(tree, 'math');
+  assert.equal(mathNodes.length, 1);
+  assert.equal(mathNodes[0].value.trim(), 'a+b');
+});
+
+test('display blocks with equation-like lines are not re-wrapped inline', () => {
+  const normalized = normalizeMarkdownMath(
+    String.raw`\[
+U_i(x; v) = a = b
+\]`
+  );
+  assert.match(normalized, /\$\$\s*U_i\(x; v\) = a = b\s*\$\$/s);
+  assert.doesNotMatch(normalized, /\\\(U_i\(x; v\) = a = b\\\)/);
 });
 
 test('classifier flags the reported currency span as suspicious', () => {
