@@ -1,19 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiRequest } from '../../../lib/api';
+import { resolveResearchProgress } from '../researchProgress';
 
 const BASE_POLL_INTERVAL_MS = 5_000;
 const SLOW_POLL_INTERVAL_MS = 5_000;
 const SLOW_POLL_AFTER_COUNT = 20;
-const NODE_PROGRESS_FALLBACK = {
-  queued: 'Research queued. Waiting to start.',
-  preparing: 'Preparing your research workflow.',
-  generate_document_outline: 'Analyzing your request, gathering context, and drafting an outline.',
-  generate_perspectives: 'Ensuring all important angles of your idea are covered.',
-  generate_content_for_perspectives: 'Performing deep, well-rounded research to collect information.',
-  final_section_generation: 'Writing your final research document.',
-  completed: 'Research completed.',
-  failed: 'Research could not be completed.',
-};
 
 const normalizeResearchStatus = (status) => {
   const normalized = String(status || '').trim().toLowerCase();
@@ -27,18 +18,6 @@ const isOngoingStatus = (status) => status === 'queued' || status === 'running';
 const normalizeNodeName = (value) => {
   const normalized = String(value || '').trim();
   return normalized || null;
-};
-const resolveProgressMessage = (status, currentNode, rawMessage) => {
-  const message = String(rawMessage || '').trim();
-  if (message) return message;
-  if (currentNode && NODE_PROGRESS_FALLBACK[currentNode]) {
-    return NODE_PROGRESS_FALLBACK[currentNode];
-  }
-  if (status === 'queued') return NODE_PROGRESS_FALLBACK.queued;
-  if (status === 'running') return 'Research is in progress.';
-  if (status === 'completed') return NODE_PROGRESS_FALLBACK.completed;
-  if (status === 'failed') return NODE_PROGRESS_FALLBACK.failed;
-  return '';
 };
 
 export const getResearchPendingMessageId = (researchId) => `pending-research-${researchId}`;
@@ -75,7 +54,12 @@ export function useResearchTasks({
     if (!researchId) return null;
     const status = normalizeResearchStatus(payload?.status);
     const currentNode = normalizeNodeName(payload?.currentNode);
-    const progressMessage = resolveProgressMessage(status, currentNode, payload?.progressMessage);
+    const { progressText: progressMessage, progressDetails } = resolveResearchProgress(
+      status,
+      currentNode,
+      payload?.progressMessage,
+      payload?.progressDetails
+    );
     const pendingMessageId =
       String(payload?.pendingMessageId || '').trim() || getResearchPendingMessageId(researchId);
     const now = Date.now();
@@ -88,6 +72,7 @@ export function useResearchTasks({
         status,
         currentNode,
         progressMessage,
+        progressDetails,
         startedAt: Number(prev[sessionId]?.startedAt || now),
         pollCount: Number(prev[sessionId]?.pollCount || 0),
         nextPollAt: now,
@@ -129,14 +114,16 @@ export function useResearchTasks({
         pendingMessageId,
         currentNode: activeTaskSnapshot?.current_node,
         progressMessage: activeTaskSnapshot?.progress_message,
+        progressDetails: activeTaskSnapshot?.progress_details,
       });
       if (sessionIdRef.current === targetSessionId) {
         ensurePendingMessage?.(pendingMessageId);
         const currentTask = taskBySessionRef.current[targetSessionId];
-        const progressText = resolveProgressMessage(
+        const { progressText, progressDetails } = resolveResearchProgress(
           taskStatus,
           normalizeNodeName(activeTaskSnapshot?.current_node),
-          activeTaskSnapshot?.progress_message || currentTask?.progressMessage
+          activeTaskSnapshot?.progress_message || currentTask?.progressMessage,
+          activeTaskSnapshot?.progress_details || currentTask?.progressDetails
         );
         if (progressText) {
           onTaskProgressInActiveSession?.({
@@ -144,6 +131,7 @@ export function useResearchTasks({
             researchId: taskId,
             pendingMessageId,
             progressText,
+            progressDetails,
           });
         }
       }
@@ -211,10 +199,11 @@ export function useResearchTasks({
 
         const status = normalizeResearchStatus(taskPayload?.status);
         const currentNode = normalizeNodeName(taskPayload?.current_node);
-        const progressMessage = resolveProgressMessage(
+        const { progressText: progressMessage, progressDetails } = resolveResearchProgress(
           status,
           currentNode,
-          taskPayload?.progress_message
+          taskPayload?.progress_message,
+          taskPayload?.progress_details
         );
         if (isOngoingStatus(status)) {
           setTaskBySession((prev) => {
@@ -227,6 +216,7 @@ export function useResearchTasks({
               status,
               currentNode,
               progressMessage,
+              progressDetails,
               pollCount: nextPollCount,
               nextPollAt: Date.now() + nextInterval,
               lastUpdatedAt: Date.now(),
@@ -238,6 +228,7 @@ export function useResearchTasks({
               researchId,
               pendingMessageId,
               progressText: progressMessage,
+              progressDetails,
             });
           }
           return;
@@ -250,6 +241,7 @@ export function useResearchTasks({
               status: 'failed',
               currentNode,
               progressMessage,
+              progressDetails,
               nextPollAt: null,
               lastUpdatedAt: Date.now(),
               failureText,
@@ -297,6 +289,7 @@ export function useResearchTasks({
               status: 'completed',
               currentNode,
               progressMessage,
+              progressDetails,
               nextPollAt: null,
               lastUpdatedAt: Date.now(),
               resultPreview: responseText.slice(0, 220),
