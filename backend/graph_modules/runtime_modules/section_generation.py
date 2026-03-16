@@ -3,8 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from langchain_core.messages import BaseMessage, HumanMessage, RemoveMessage
-from langgraph.graph.message import REMOVE_ALL_MESSAGES
+from langchain_core.messages import BaseMessage, HumanMessage
 from structures import CompleteDocument, ContentSection
 
 from ..helpers import (
@@ -13,17 +12,10 @@ from ..helpers import (
     is_structured_output_error,
     message_text,
 )
-
-
-SECTION_THREAD_SUMMARY_PROMPT = """
-Summarize the earlier conversation and tool work for a specialist research agent.
-
-Preserve factual findings, tool outputs, URLs, constraints, open questions, and what was
-already attempted. Be concise but do not omit important evidence or decisions.
-
-Messages to summarize:
-{messages}
-""".strip()
+from .expert_context import (
+    EXPERT_CONTEXT_SUMMARY_PROMPT,
+    maybe_compact_agent_thread_history as _maybe_compact_agent_thread_history,
+)
 
 
 def build_agent_run_config(
@@ -42,20 +34,51 @@ def build_agent_run_config(
 
 
 def is_context_window_error(error: Exception) -> bool:
-    text = str(error or "").lower()
-    return any(
-        marker in text
-        for marker in (
-            "context window",
-            "context_length_exceeded",
-            "maximum context length",
-            "too many tokens",
-            "input tokens",
-            "prompt is too long",
-            "requested too many tokens",
-            "token limit",
-        )
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    markers = (
+        "context window",
+        "context_length_exceeded",
+        "maximum context length",
+        "too many tokens",
+        "input tokens",
+        "prompt is too long",
+        "requested too many tokens",
+        "token limit",
     )
+
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+
+        candidate_strings = [
+            str(current or ""),
+            str(getattr(current, "code", "") or ""),
+            str(getattr(current, "type", "") or ""),
+            str(getattr(current, "param", "") or ""),
+            str(getattr(current, "body", "") or ""),
+            str(getattr(current, "response", "") or ""),
+        ]
+        for candidate in candidate_strings:
+            text = candidate.lower()
+            if any(marker in text for marker in markers):
+                return True
+
+        cause = getattr(current, "__cause__", None)
+        if isinstance(cause, BaseException):
+            pending.append(cause)
+
+        context = getattr(current, "__context__", None)
+        if isinstance(context, BaseException):
+            pending.append(context)
+
+        for nested in getattr(current, "exceptions", ()) or ():
+            if isinstance(nested, BaseException):
+                pending.append(nested)
+
+    return False
 
 
 def retry_delay_for_index(delays: tuple[float, ...], retry_index: int) -> float:
@@ -64,17 +87,6 @@ def retry_delay_for_index(delays: tuple[float, ...], retry_index: int) -> float:
     if retry_index < len(delays):
         return max(float(delays[retry_index]), 0.0)
     return max(float(delays[-1]), 0.0)
-
-
-def format_messages_for_summary(messages: list[BaseMessage]) -> str:
-    lines: list[str] = []
-    for message in messages:
-        role = str(getattr(message, "type", message.__class__.__name__) or message.__class__.__name__)
-        content = message_text(message).strip()
-        if not content:
-            continue
-        lines.append(f"{role.upper()}: {content}")
-    return "\n\n".join(lines).strip()
 
 
 def build_section_thread_id(expert_index: int, section_index: int, cold_generation: int) -> str:
@@ -147,66 +159,31 @@ async def compact_agent_thread_history(
     agent: object,
     summary_model: Any,
     thread_config: dict[str, Any],
+    trigger_tokens: int = 1,
     keep_last_messages: int,
+    trim_tokens_to_summarize: int | None = None,
     summary_config: dict[str, Any] | None = None,
-) -> None:
-    if keep_last_messages <= 0 or not hasattr(agent, "get_state") or not hasattr(agent, "update_state"):
-        return
-
+    force: bool = True,
+    timeout_seconds: float | None = None,
+) -> bool:
+    awaitable = _maybe_compact_agent_thread_history(
+        agent=agent,
+        summary_model=summary_model,
+        thread_config=thread_config,
+        trigger_tokens=trigger_tokens,
+        keep_last_messages=keep_last_messages,
+        trim_tokens_to_summarize=trim_tokens_to_summarize,
+        summary_prompt=EXPERT_CONTEXT_SUMMARY_PROMPT,
+        summary_config=summary_config,
+        force=force,
+    )
+    if timeout_seconds is None or timeout_seconds <= 0:
+        return await awaitable
     try:
-        snapshot = agent.get_state(thread_config)
-        state_values = getattr(snapshot, "values", {}) if snapshot is not None else {}
-        messages = list(state_values.get("messages") or [])
-    except Exception as error:
-        print(f"[graph] Failed to inspect agent thread for compaction: {error}")
-        return
-
-    if len(messages) <= keep_last_messages:
-        return
-
-    older_messages = [message for message in messages[:-keep_last_messages] if isinstance(message, BaseMessage)]
-    preserved_messages = [
-        message for message in messages[-keep_last_messages:] if isinstance(message, BaseMessage)
-    ]
-    if len(older_messages) == 0:
-        return
-
-    summary_input = format_messages_for_summary(older_messages)
-    if not summary_input:
-        return
-
-    try:
-        summary_message = await summary_model.ainvoke(
-            SECTION_THREAD_SUMMARY_PROMPT.format(messages=summary_input),
-            config=summary_config,
-        )
-        summary_text = message_text(summary_message).strip()
-    except asyncio.CancelledError:
-        raise
-    except Exception as error:
-        print(f"[graph] Agent thread compaction summary failed: {error}")
-        return
-
-    replacement_messages: list[BaseMessage] = [RemoveMessage(id=REMOVE_ALL_MESSAGES)]
-    if summary_text:
-        replacement_messages.append(
-            HumanMessage(
-                content=(
-                    "Summary of earlier section work, tool calls, and findings:\n"
-                    f"{summary_text}"
-                )
-            )
-        )
-    replacement_messages.extend(preserved_messages)
-
-    try:
-        agent.update_state(
-            thread_config,
-            {"messages": replacement_messages},
-            as_node="model",
-        )
-    except Exception as error:
-        print(f"[graph] Failed to compact agent thread history: {error}")
+        return await asyncio.wait_for(awaitable, timeout=float(timeout_seconds))
+    except asyncio.TimeoutError:
+        print("[graph] Agent thread compaction timed out.")
+        return False
 
 
 async def generate_section_with_retry_policy(
@@ -220,7 +197,10 @@ async def generate_section_with_retry_policy(
     section_index: int,
     section_retry_delays: tuple[float, ...],
     section_attempt_timeout_seconds: float,
+    section_context_trigger_tokens: int,
     section_context_keep_messages: int,
+    section_context_trim_tokens_to_summarize: int | None,
+    summary_timeout_seconds: float,
     emit_progress: Any = None,
     run_config: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
@@ -242,6 +222,21 @@ async def generate_section_with_retry_policy(
             f"{expert_label}: generating '{section_title}' ({attempt_label})."
         )
         try:
+            proactively_compacted = await compact_agent_thread_history(
+                agent=agent,
+                summary_model=summary_model,
+                thread_config=thread_config,
+                trigger_tokens=section_context_trigger_tokens,
+                keep_last_messages=section_context_keep_messages,
+                trim_tokens_to_summarize=section_context_trim_tokens_to_summarize,
+                summary_config=run_config,
+                force=False,
+                timeout_seconds=summary_timeout_seconds,
+            )
+            if proactively_compacted:
+                await _emit_status(
+                    f"{expert_label}: compacted existing context for '{section_title}' before {attempt_label}."
+                )
             result = await asyncio.wait_for(
                 invoke_section_agent(agent=agent, prompt=prompt, run_config=thread_config),
                 timeout=section_attempt_timeout_seconds,
@@ -264,8 +259,12 @@ async def generate_section_with_retry_policy(
                     agent=agent,
                     summary_model=summary_model,
                     thread_config=thread_config,
+                    trigger_tokens=section_context_trigger_tokens,
                     keep_last_messages=section_context_keep_messages,
+                    trim_tokens_to_summarize=section_context_trim_tokens_to_summarize,
                     summary_config=run_config,
+                    force=True,
+                    timeout_seconds=summary_timeout_seconds,
                 )
 
             delay = retry_delay_for_index(section_retry_delays, retry_counter)
@@ -285,6 +284,21 @@ async def generate_section_with_retry_policy(
             f"{expert_label}: cold retry {cold_retry}/{cold_retry_budget} for '{section_title}'."
         )
         try:
+            proactively_compacted = await compact_agent_thread_history(
+                agent=agent,
+                summary_model=summary_model,
+                thread_config=thread_config,
+                trigger_tokens=section_context_trigger_tokens,
+                keep_last_messages=section_context_keep_messages,
+                trim_tokens_to_summarize=section_context_trim_tokens_to_summarize,
+                summary_config=run_config,
+                force=False,
+                timeout_seconds=summary_timeout_seconds,
+            )
+            if proactively_compacted:
+                await _emit_status(
+                    f"{expert_label}: compacted existing context for '{section_title}' before cold retry {cold_retry}/{cold_retry_budget}."
+                )
             result = await asyncio.wait_for(
                 invoke_section_agent(agent=agent, prompt=prompt, run_config=thread_config),
                 timeout=section_attempt_timeout_seconds,
@@ -330,7 +344,10 @@ async def run_expert_pipeline(
     node_builder: Any,
     section_retry_delays: tuple[float, ...],
     section_attempt_timeout_seconds: float,
+    section_context_trigger_tokens: int,
     section_context_keep_messages: int,
+    section_context_trim_tokens_to_summarize: int | None,
+    summary_timeout_seconds: float,
     run_config: dict[str, Any] | None = None,
 ) -> list[str]:
     print(f"[graph] Expert pipeline started: index={expert_index}, name='{expert_name}'")
@@ -340,7 +357,7 @@ async def run_expert_pipeline(
     expert_history = build_history_from_section_results(sections, section_results, expert_name)
     summary = str((saved_progress or {}).get("summary") or "").strip() or None
 
-    if len(section_results) > 0 and emit_progress is not None:
+    if 0 < len(section_results) < len(sections) and emit_progress is not None:
         await emit_progress(
             "generate_content_for_perspectives",
             (
@@ -366,7 +383,10 @@ async def run_expert_pipeline(
             section_index=section_index,
             section_retry_delays=section_retry_delays,
             section_attempt_timeout_seconds=section_attempt_timeout_seconds,
+            section_context_trigger_tokens=section_context_trigger_tokens,
             section_context_keep_messages=section_context_keep_messages,
+            section_context_trim_tokens_to_summarize=section_context_trim_tokens_to_summarize,
+            summary_timeout_seconds=summary_timeout_seconds,
             emit_progress=emit_progress,
             run_config=run_config,
         )
@@ -385,15 +405,23 @@ async def run_expert_pipeline(
         expert_history.append(f"## {section_title}\n\n{history_text}".strip())
 
         try:
-            summary_message = await summary_model.ainvoke(
-                node_builder.generate_rolling_summary("\n\n".join(expert_history)),
-                config=run_config,
+            summary_message = await asyncio.wait_for(
+                summary_model.ainvoke(
+                    node_builder.generate_rolling_summary("\n\n".join(expert_history)),
+                    config=run_config,
+                ),
+                timeout=float(summary_timeout_seconds),
             )
             next_summary = message_text(summary_message).strip()
             if next_summary:
                 summary = next_summary
         except asyncio.CancelledError:
             raise
+        except asyncio.TimeoutError:
+            print(
+                f"[graph] Summary update timed out for expert '{expert_name}' "
+                f"after section '{section_title}'. Continuing with prior summary."
+            )
         except Exception as error:
             print(
                 f"[graph] Summary update failed for expert '{expert_name}' "
