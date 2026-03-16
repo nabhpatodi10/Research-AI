@@ -23,15 +23,19 @@ async def emit_progress(
     progress_callback: Any,
     node_name: str,
     progress_message: str | None = None,
+    progress_details: dict[str, Any] | None = None,
     timeout_seconds: float | None = None,
 ) -> bool:
     if progress_callback is None:
         return True
     try:
         try:
-            maybe_result = progress_callback(node_name, progress_message)
+            maybe_result = progress_callback(node_name, progress_message, progress_details)
         except TypeError:
-            maybe_result = progress_callback(node_name)
+            try:
+                maybe_result = progress_callback(node_name, progress_message)
+            except TypeError:
+                maybe_result = progress_callback(node_name)
         result = await _resolve_callback_result(
             maybe_result,
             timeout_seconds=timeout_seconds,
