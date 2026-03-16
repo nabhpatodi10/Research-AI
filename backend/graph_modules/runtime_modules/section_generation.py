@@ -197,11 +197,12 @@ async def generate_section_with_retry_policy(
     section_index: int,
     section_retry_delays: tuple[float, ...],
     section_attempt_timeout_seconds: float,
+    section_total: int,
     section_context_trigger_tokens: int,
     section_context_keep_messages: int,
     section_context_trim_tokens_to_summarize: int | None,
     summary_timeout_seconds: float,
-    emit_progress: Any = None,
+    emit_expert_status: Any = None,
     run_config: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     warm_retry_budget = 2
@@ -211,16 +212,24 @@ async def generate_section_with_retry_policy(
     thread_id = build_section_thread_id(expert_index, section_index, thread_generation)
     thread_config = build_agent_run_config(run_config, thread_id)
 
-    async def _emit_status(message: str) -> None:
-        if emit_progress is None:
+    async def _emit_status(status: str, status_label: str) -> None:
+        if emit_expert_status is None:
             return
-        await emit_progress("generate_content_for_perspectives", message)
+        await emit_expert_status(
+            {
+                "status": str(status or "").strip().lower() or "writing",
+                "status_label": str(status_label or "").strip() or "Writing",
+                "section_index": section_index + 1,
+                "section_total": max(int(section_total or 0), 1),
+                "section_title": section_title,
+            }
+        )
 
     for warm_attempt in range(warm_retry_budget + 1):
-        attempt_label = "initial attempt" if warm_attempt == 0 else f"warm retry {warm_attempt}/{warm_retry_budget}"
-        await _emit_status(
-            f"{expert_label}: generating '{section_title}' ({attempt_label})."
-        )
+        if warm_attempt == 0:
+            await _emit_status("writing", "Writing")
+        else:
+            await _emit_status("warm_retry", f"Warm Retry {warm_attempt}/{warm_retry_budget}")
         try:
             proactively_compacted = await compact_agent_thread_history(
                 agent=agent,
@@ -234,9 +243,7 @@ async def generate_section_with_retry_policy(
                 timeout_seconds=summary_timeout_seconds,
             )
             if proactively_compacted:
-                await _emit_status(
-                    f"{expert_label}: compacted existing context for '{section_title}' before {attempt_label}."
-                )
+                await _emit_status("writing", "Writing")
             result = await asyncio.wait_for(
                 invoke_section_agent(agent=agent, prompt=prompt, run_config=thread_config),
                 timeout=section_attempt_timeout_seconds,
@@ -252,9 +259,7 @@ async def generate_section_with_retry_policy(
                 break
 
             if is_context_window_error(error):
-                await _emit_status(
-                    f"{expert_label}: compacting context for '{section_title}' before warm retry {warm_attempt + 1}/{warm_retry_budget}."
-                )
+                await _emit_status("compacting", "Compacting Context")
                 await compact_agent_thread_history(
                     agent=agent,
                     summary_model=summary_model,
@@ -270,7 +275,8 @@ async def generate_section_with_retry_policy(
             delay = retry_delay_for_index(section_retry_delays, retry_counter)
             retry_counter += 1
             print(
-                f"[graph] Expert '{expert_label}' failed during {attempt_label} for "
+                f"[graph] Expert '{expert_label}' failed during "
+                f"{'initial attempt' if warm_attempt == 0 else f'warm retry {warm_attempt}/{warm_retry_budget}'} for "
                 f"section '{section_title}': {error}. Retrying same thread in {delay:.1f}s."
             )
             if delay > 0:
@@ -280,9 +286,7 @@ async def generate_section_with_retry_policy(
         thread_generation = cold_retry
         thread_id = build_section_thread_id(expert_index, section_index, thread_generation)
         thread_config = build_agent_run_config(run_config, thread_id)
-        await _emit_status(
-            f"{expert_label}: cold retry {cold_retry}/{cold_retry_budget} for '{section_title}'."
-        )
+        await _emit_status("cold_retry", f"Cold Retry {cold_retry}/{cold_retry_budget}")
         try:
             proactively_compacted = await compact_agent_thread_history(
                 agent=agent,
@@ -296,9 +300,7 @@ async def generate_section_with_retry_policy(
                 timeout_seconds=summary_timeout_seconds,
             )
             if proactively_compacted:
-                await _emit_status(
-                    f"{expert_label}: compacted existing context for '{section_title}' before cold retry {cold_retry}/{cold_retry_budget}."
-                )
+                await _emit_status("cold_retry", f"Cold Retry {cold_retry}/{cold_retry_budget}")
             result = await asyncio.wait_for(
                 invoke_section_agent(agent=agent, prompt=prompt, run_config=thread_config),
                 timeout=section_attempt_timeout_seconds,
@@ -327,7 +329,7 @@ async def generate_section_with_retry_policy(
             if delay > 0:
                 await asyncio.sleep(delay)
 
-    await _emit_status(f"{expert_label}: skipped '{section_title}' after exhausting retries.")
+    await _emit_status("skipped", "Skipped")
     return "", "skipped"
 
 
@@ -338,7 +340,7 @@ async def run_expert_pipeline(
     expert_agent: object,
     sections: list,
     saved_progress: dict[str, Any] | None,
-    emit_progress: Any,
+    emit_expert_status: Any,
     persist_progress: Any,
     summary_model: Any,
     node_builder: Any,
@@ -357,15 +359,6 @@ async def run_expert_pipeline(
     expert_history = build_history_from_section_results(sections, section_results, expert_name)
     summary = str((saved_progress or {}).get("summary") or "").strip() or None
 
-    if 0 < len(section_results) < len(sections) and emit_progress is not None:
-        await emit_progress(
-            "generate_content_for_perspectives",
-            (
-                f"{expert_name}: resuming from section "
-                f"{min(len(section_results), len(sections)) + 1}/{max(len(sections), 1)}."
-            ),
-        )
-
     for section_index in range(len(section_results), len(sections)):
         section = sections[section_index]
         section_title = str(getattr(section, "section_title", "Untitled Section") or "Untitled Section")
@@ -383,11 +376,12 @@ async def run_expert_pipeline(
             section_index=section_index,
             section_retry_delays=section_retry_delays,
             section_attempt_timeout_seconds=section_attempt_timeout_seconds,
+            section_total=len(sections),
             section_context_trigger_tokens=section_context_trigger_tokens,
             section_context_keep_messages=section_context_keep_messages,
             section_context_trim_tokens_to_summarize=section_context_trim_tokens_to_summarize,
             summary_timeout_seconds=summary_timeout_seconds,
-            emit_progress=emit_progress,
+            emit_expert_status=emit_expert_status,
             run_config=run_config,
         )
 
@@ -440,6 +434,22 @@ async def run_expert_pipeline(
                     f"{section_index + 1}/{len(sections)}."
                 ),
             )
+
+    if emit_expert_status is not None:
+        last_section_title = (
+            str(getattr(sections[-1], "section_title", "Untitled Section") or "Untitled Section")
+            if len(sections) > 0
+            else None
+        )
+        await emit_expert_status(
+            {
+                "status": "completed",
+                "status_label": "Completed",
+                "section_index": len(sections) if len(sections) > 0 else None,
+                "section_total": len(sections) if len(sections) > 0 else None,
+                "section_title": last_section_title,
+            }
+        )
 
     print(
         f"[graph] Expert pipeline completed: index={expert_index}, "
