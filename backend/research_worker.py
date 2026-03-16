@@ -8,7 +8,7 @@ from playwright.async_api import Browser
 
 from database import Database
 from graph import ResearchGraph
-from graph_modules.runtime_modules.errors import ResearchTerminalError
+from graph_modules.runtime_modules.errors import ResearchOwnershipLostError, ResearchTerminalError
 from research_progress import progress_message_for_node
 from settings import get_settings
 from structures import CompleteDocument
@@ -96,7 +96,43 @@ class ResearchBackgroundWorker:
         self._poll_interval_seconds = settings.research_background_poll_interval_seconds
         self._batch_size = settings.research_background_batch_size
         self._max_retries = settings.research_background_max_retries
+        self._heartbeat_interval_seconds = max(
+            0.01,
+            float(settings.research_job_heartbeat_interval_seconds),
+        )
+        self._lease_duration_seconds = max(
+            self._heartbeat_interval_seconds + 1.0,
+            float(settings.research_job_lease_duration_seconds),
+        )
+        self._stale_warning_seconds = max(
+            0.01,
+            float(settings.research_job_stale_warning_seconds),
+        )
+        self._stale_timeout_seconds = max(
+            self._lease_duration_seconds,
+            float(settings.research_job_stale_timeout_seconds),
+        )
         self._execution_service = ResearchExecutionService(database=database, browser=browser)
+
+    async def _heartbeat_loop(self, job_id: str) -> None:
+        while True:
+            await asyncio.sleep(self._heartbeat_interval_seconds)
+            try:
+                still_owned = await self._database.heartbeat_research_job(
+                    job_id=job_id,
+                    worker_id=self._worker_id,
+                    lease_duration_seconds=self._lease_duration_seconds,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.warning("Heartbeat update failed for research job %s: %s", job_id, error)
+                continue
+
+            if not still_owned:
+                raise ResearchOwnershipLostError(
+                    f"Lost ownership of research job {job_id} during heartbeat refresh."
+                )
 
     async def _process_job(self, job: dict[str, Any]) -> None:
         job_id = str(job.get("id") or "").strip()
@@ -116,27 +152,32 @@ class ResearchBackgroundWorker:
         resume_from_node = str(job.get("resumeFromNode") or "").strip() or None
         current_node_tracker = resume_from_node or "preparing"
 
-        await self._database.set_user_session_active_task_status(
-            user_id=user_id,
-            session_id=session_id,
-            task_id=job_id,
-            status="running",
-        )
-        await self._database.update_research_job_progress(
-            job_id=job_id,
-            current_node=current_node_tracker,
-            progress_message=progress_message_for_node(current_node_tracker),
-            status="running",
-        )
-
         try:
+            await self._database.set_user_session_active_task_status(
+                user_id=user_id,
+                session_id=session_id,
+                task_id=job_id,
+                status="running",
+            )
+            still_owned = await self._database.update_research_job_progress(
+                job_id=job_id,
+                current_node=current_node_tracker,
+                progress_message=progress_message_for_node(current_node_tracker),
+                status="running",
+                expected_worker_id=self._worker_id,
+            )
+            if not still_owned:
+                raise ResearchOwnershipLostError(
+                    f"Lost ownership of research job {job_id} before processing began."
+                )
+
             async def _progress(
                 node_name: str,
                 progress_message: str | None = None,
             ) -> None:
                 nonlocal current_node_tracker
                 current_node_tracker = str(node_name or "").strip() or current_node_tracker
-                await self._database.update_research_job_progress(
+                still_owned = await self._database.update_research_job_progress(
                     job_id=job_id,
                     current_node=node_name,
                     progress_message=(
@@ -144,38 +185,91 @@ class ResearchBackgroundWorker:
                         or progress_message_for_node(node_name)
                     ),
                     status="running",
+                    expected_worker_id=self._worker_id,
                 )
+                if not still_owned:
+                    raise ResearchOwnershipLostError(
+                        f"Lost ownership of research job {job_id} while updating progress."
+                    )
 
             async def _checkpoint(
                 completed_node: str,
                 graph_state: dict[str, Any],
                 next_node: str | None,
             ) -> None:
-                await self._database.update_research_job_checkpoint(
+                still_owned = await self._database.update_research_job_checkpoint(
                     job_id=job_id,
                     graph_state=graph_state,
                     resume_from_node=next_node,
+                    expected_worker_id=self._worker_id,
+                )
+                if not still_owned:
+                    raise ResearchOwnershipLostError(
+                        f"Lost ownership of research job {job_id} while checkpointing."
+                    )
+
+            execution_task = asyncio.create_task(
+                self._execution_service.run(
+                    job,
+                    progress_callback=_progress,
+                    checkpoint_callback=_checkpoint,
+                )
+            )
+            heartbeat_task = asyncio.create_task(self._heartbeat_loop(job_id))
+
+            try:
+                done, _ = await asyncio.wait(
+                    {execution_task, heartbeat_task},
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
 
-            result_text = await self._execution_service.run(
-                job,
-                progress_callback=_progress,
-                checkpoint_callback=_checkpoint,
+                if execution_task in done:
+                    result_text = await execution_task
+                else:
+                    try:
+                        await heartbeat_task
+                    finally:
+                        execution_task.cancel()
+                        await asyncio.gather(execution_task, return_exceptions=True)
+                    raise ResearchOwnershipLostError(
+                        f"Lost ownership of research job {job_id} during execution."
+                    )
+            finally:
+                heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
+
+            still_owned = await self._database.mark_research_job_completed(
+                job_id=job_id,
+                result_text=result_text,
+                expected_worker_id=self._worker_id,
             )
-            await self._database.mark_research_job_completed(job_id=job_id, result_text=result_text)
+            if not still_owned:
+                raise ResearchOwnershipLostError(
+                    f"Lost ownership of research job {job_id} before completion write."
+                )
             await self._database.clear_user_session_active_task_if_matches(
                 user_id=user_id,
                 session_id=session_id,
                 task_id=job_id,
             )
             logger.info("Completed research job %s for session %s.", job_id, session_id)
+        except ResearchOwnershipLostError as error:
+            logger.warning("Stopping research job %s after ownership loss: %s", job_id, error)
+            return
         except ResearchTerminalError as error:
-            await self._database.mark_research_job_failed(
+            still_owned = await self._database.mark_research_job_failed(
                 job_id=job_id,
                 error_message=str(error),
                 attempts=attempts + 1,
                 resume_from_node=current_node_tracker,
+                expected_worker_id=self._worker_id,
             )
+            if not still_owned:
+                logger.warning(
+                    "Research job %s lost ownership before terminal failure could be written.",
+                    job_id,
+                )
+                return
             await self._database.clear_user_session_active_task_if_matches(
                 user_id=user_id,
                 session_id=session_id,
@@ -187,12 +281,19 @@ class ResearchBackgroundWorker:
         except Exception as error:
             next_attempt = attempts + 1
             if next_attempt >= self._max_retries:
-                await self._database.mark_research_job_failed(
+                still_owned = await self._database.mark_research_job_failed(
                     job_id=job_id,
                     error_message=str(error),
                     attempts=next_attempt,
                     resume_from_node=current_node_tracker,
+                    expected_worker_id=self._worker_id,
                 )
+                if not still_owned:
+                    logger.warning(
+                        "Research job %s lost ownership before permanent failure could be written.",
+                        job_id,
+                    )
+                    return
                 await self._database.clear_user_session_active_task_if_matches(
                     user_id=user_id,
                     session_id=session_id,
@@ -207,13 +308,20 @@ class ResearchBackgroundWorker:
                 return
 
             retry_delay_seconds = min(180, 10 * (2 ** (next_attempt - 1)))
-            await self._database.requeue_research_job(
+            still_owned = await self._database.requeue_research_job(
                 job_id=job_id,
                 attempts=next_attempt,
                 error_message=str(error),
                 delay_seconds=retry_delay_seconds,
                 resume_from_node=current_node_tracker,
+                expected_worker_id=self._worker_id,
             )
+            if not still_owned:
+                logger.warning(
+                    "Research job %s lost ownership before requeue could be written.",
+                    job_id,
+                )
+                return
             await self._database.set_user_session_active_task_status(
                 user_id=user_id,
                 session_id=session_id,
@@ -228,27 +336,37 @@ class ResearchBackgroundWorker:
             )
 
     async def run_forever(self) -> None:
-        active_tasks: set[asyncio.Task[None]] = set()
+        active_tasks: dict[asyncio.Task[None], str] = {}
         try:
             while True:
                 try:
                     done_tasks = [task for task in active_tasks if task.done()]
                     for task in done_tasks:
-                        active_tasks.discard(task)
+                        job_id = active_tasks.pop(task, "<unknown>")
                         try:
-                            _ = task.exception()
+                            error = task.exception()
                         except asyncio.CancelledError:
                             pass
-                        except Exception:
-                            pass
+                        else:
+                            if error is not None:
+                                logger.error(
+                                    "Unhandled research job task failure for %s: %s",
+                                    job_id,
+                                    error,
+                                    exc_info=(type(error), error, error.__traceback__),
+                                )
 
                     jobs = await self._database.claim_research_jobs(
                         worker_id=self._worker_id,
                         limit=self._batch_size,
+                        lease_duration_seconds=self._lease_duration_seconds,
+                        stale_warning_seconds=self._stale_warning_seconds,
+                        stale_timeout_seconds=self._stale_timeout_seconds,
                     )
                     for job in jobs:
+                        job_id = str(job.get("id") or "").strip() or "<unknown>"
                         task = asyncio.create_task(self._process_job(job))
-                        active_tasks.add(task)
+                        active_tasks[task] = job_id
 
                     if not jobs:
                         await asyncio.sleep(self._poll_interval_seconds)
