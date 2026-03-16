@@ -70,6 +70,7 @@ export function chatReducer(state = defaultState, action) {
           {
             id: String(action.pendingMessageId),
             text: '',
+            progressDetails: null,
             sender: 'ai',
             status: 'pending',
           },
@@ -121,6 +122,7 @@ export function chatReducer(state = defaultState, action) {
           ? {
               ...message,
               text: queuedText,
+              progressDetails: action.progressDetails || null,
               sender: 'ai',
               status: 'pending',
             }
@@ -137,14 +139,16 @@ export function chatReducer(state = defaultState, action) {
     }
     case 'TASK_PROGRESS': {
       const progressText = String(action.progressText || '').trim();
-      if (!progressText) return state;
+      const progressDetails = action.progressDetails || null;
+      if (!progressText && !progressDetails) return state;
       return {
         ...state,
         messages: state.messages.map((message) =>
           message.id === action.pendingMessageId && message.status === 'pending'
             ? {
                 ...message,
-                text: progressText,
+                text: progressText || message.text,
+                progressDetails,
                 sender: 'ai',
                 status: 'pending',
               }
@@ -252,6 +256,7 @@ export function chatReducer(state = defaultState, action) {
           {
             id: pendingMessageId,
             text: 'Research is in progress. Final document will appear here once complete.',
+            progressDetails: null,
             sender: 'ai',
             status: 'pending',
           },
