@@ -55,18 +55,17 @@ class ResearchGraph:
     ):
         self.__node = Nodes()
         settings = get_settings()
-        gpt_model_name = "gpt-5-nano" if model_tier == "mini" else "gpt-5-mini"
         self.__gemini_model = (
-            ChatGoogleGenerativeAI(model="gemini-3-flash-preview", thinking_level="high")
+            ChatGoogleGenerativeAI(model="models/gemini-flash-latest", thinking_level="high")
             if model_tier == "pro"
-            else ChatGoogleGenerativeAI(model="models/gemini-flash-latest", thinking_budget=-1)
+            else ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview", thinking_level="high")
         )
         verbosity = document_length if document_length in {"low", "medium", "high"} else "high"
         self.__research_breadth = research_breadth
         self.__expert_count = expert_count_for_breadth(research_breadth)
         self.__gpt_model = ChatOpenAI(
-            model=gpt_model_name,
-            reasoning={"effort": "medium"},
+            model="gpt-5.4-nano" if model_tier == "pro" else "gpt-5-nano",
+            reasoning={"effort": "xhigh"} if model_tier == "pro" else {"effort": "medium"},
             verbosity=verbosity,
             use_responses_api=True,
             timeout=600.0,
@@ -97,8 +96,8 @@ class ResearchGraph:
             int(settings.expert_context_summary_trim_tokens_to_summarize),
         )
         self.__final_content_model = ChatOpenAI(
-            model=gpt_model_name,
-            reasoning={"effort": "high"},
+            model="gpt-5.4-mini" if model_tier == "pro" else "gpt-5-nano",
+            reasoning={"effort": "xhigh"} if model_tier == "pro" else {"effort": "high"},
             verbosity=verbosity,
             use_responses_api=True,
             timeout=600.0,
