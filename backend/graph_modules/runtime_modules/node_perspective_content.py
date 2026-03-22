@@ -11,7 +11,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from ..helpers import fallback_section_text
 from .expert_context import (
     EXPERT_CONTEXT_SUMMARY_PROMPT as HIGH_FIDELITY_SUMMARY_PROMPT,
-    ExpertContextSummarizationMiddleware,
+    HighFidelityExpertSummarizationMiddleware,
 )
 from .errors import ResearchOwnershipLostError
 from .section_generation import normalize_saved_section_results
@@ -545,7 +545,7 @@ async def run_generate_content_for_perspectives(
         middleware = []
         if expert_context_summarization_enabled:
             middleware = [
-                ExpertContextSummarizationMiddleware(
+                HighFidelityExpertSummarizationMiddleware(
                     summary_model=summary_model,
                     trigger_tokens=max(1, int(expert_context_summary_trigger_tokens)),
                     keep_last_messages=max(1, int(expert_context_summary_keep_messages)),
