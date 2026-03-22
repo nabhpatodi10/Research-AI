@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from structures import CompleteDocument, ContentSection
 
 from ..helpers import (
@@ -14,7 +14,10 @@ from ..helpers import (
 )
 from .expert_context import (
     EXPERT_CONTEXT_SUMMARY_PROMPT,
+    get_agent_thread_messages,
     maybe_compact_agent_thread_history as _maybe_compact_agent_thread_history,
+    replace_agent_thread_messages,
+    thread_has_invalid_tool_call_state,
 )
 
 
@@ -149,9 +152,11 @@ async def invoke_section_agent(
     agent: object,
     prompt: str,
     *,
+    append_prompt: bool = True,
     run_config: dict[str, Any] | None = None,
 ) -> dict:
-    return await agent.ainvoke({"messages": [HumanMessage(content=prompt)]}, config=run_config)
+    payload_messages = [HumanMessage(content=prompt)] if append_prompt else []
+    return await agent.ainvoke({"messages": payload_messages}, config=run_config)
 
 
 async def compact_agent_thread_history(
@@ -183,6 +188,129 @@ async def compact_agent_thread_history(
         return await asyncio.wait_for(awaitable, timeout=float(timeout_seconds))
     except asyncio.TimeoutError:
         print("[graph] Agent thread compaction timed out.")
+        return False
+
+
+def _latest_matching_prompt_index(
+    messages: list[BaseMessage],
+    prompt: str,
+) -> int | None:
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if isinstance(message, HumanMessage) and str(getattr(message, "content", "")) == str(prompt):
+            return index
+    return None
+
+
+def _extract_ai_tool_call_ids(message: BaseMessage) -> list[str]:
+    if not isinstance(message, AIMessage):
+        return []
+
+    ids: list[str] = []
+    for tool_call in getattr(message, "tool_calls", None) or []:
+        tool_call_id = ""
+        if isinstance(tool_call, dict):
+            tool_call_id = str(tool_call.get("id") or "").strip()
+        else:
+            tool_call_id = str(getattr(tool_call, "id", "") or "").strip()
+        if tool_call_id:
+            ids.append(tool_call_id)
+    return ids
+
+
+def build_sanitized_retry_messages(
+    messages: list[BaseMessage],
+    prompt: str,
+) -> list[BaseMessage] | None:
+    prompt_index = _latest_matching_prompt_index(messages, prompt)
+    if prompt_index is None:
+        return None
+
+    prompt_and_history = list(messages[: prompt_index + 1])
+    suffix = list(messages[prompt_index + 1 :])
+    candidate_suffix: list[BaseMessage] = []
+    safe_suffix: list[BaseMessage] = []
+    pending_tool_call_ids: set[str] = set()
+
+    for message in suffix:
+        if isinstance(message, AIMessage):
+            if pending_tool_call_ids:
+                break
+
+            tool_call_ids = _extract_ai_tool_call_ids(message)
+            if len(tool_call_ids) == 0:
+                break
+
+            pending_tool_call_ids.update(tool_call_ids)
+            candidate_suffix.append(message)
+            continue
+
+        if isinstance(message, ToolMessage):
+            tool_call_id = str(getattr(message, "tool_call_id", "") or "").strip()
+            if not tool_call_id or tool_call_id not in pending_tool_call_ids:
+                break
+
+            pending_tool_call_ids.remove(tool_call_id)
+            candidate_suffix.append(message)
+            if len(pending_tool_call_ids) == 0:
+                safe_suffix = list(candidate_suffix)
+            continue
+
+        break
+
+    return [*prompt_and_history, *safe_suffix]
+
+
+def is_warm_retry_thread_safe(
+    messages: list[BaseMessage],
+    prompt: str,
+) -> bool:
+    if thread_has_invalid_tool_call_state(messages):
+        return False
+
+    prompt_index = _latest_matching_prompt_index(messages, prompt)
+    if prompt_index is None:
+        return False
+
+    last_message = messages[-1] if messages else None
+    return isinstance(last_message, (HumanMessage, ToolMessage))
+
+
+async def sanitize_failed_section_turn_for_warm_retry(
+    *,
+    agent: object,
+    thread_config: dict[str, Any],
+    prompt: str,
+) -> bool:
+    if not hasattr(agent, "get_state"):
+        return False
+
+    try:
+        messages = get_agent_thread_messages(agent=agent, thread_config=thread_config)
+    except Exception as error:
+        print(f"[graph] Failed to inspect agent thread for warm-retry cleanup: {error}")
+        return False
+
+    replacement_messages = build_sanitized_retry_messages(messages, prompt)
+    if replacement_messages is None:
+        print("[graph] Failed to clean expert thread after warm retry: prompt not found.")
+        return False
+
+    if not is_warm_retry_thread_safe(replacement_messages, prompt):
+        print("[graph] Failed to clean expert thread after warm retry: unresolved thread state remains.")
+        return False
+
+    if replacement_messages == messages:
+        return True
+
+    try:
+        return await replace_agent_thread_messages(
+            agent=agent,
+            thread_config=thread_config,
+            replacement_messages=replacement_messages,
+        )
+    except Exception as error:
+        print(f"[graph] Failed to rewrite expert thread during warm-retry cleanup: {error}")
         return False
 
 
@@ -245,7 +373,12 @@ async def generate_section_with_retry_policy(
             if proactively_compacted:
                 await _emit_status("writing", "Writing")
             result = await asyncio.wait_for(
-                invoke_section_agent(agent=agent, prompt=prompt, run_config=thread_config),
+                invoke_section_agent(
+                    agent=agent,
+                    prompt=prompt,
+                    append_prompt=(warm_attempt == 0),
+                    run_config=thread_config,
+                ),
                 timeout=section_attempt_timeout_seconds,
             )
             content_text = extract_agent_text_content(result).strip()
@@ -258,9 +391,21 @@ async def generate_section_with_retry_policy(
             if warm_attempt >= warm_retry_budget:
                 break
 
+            cleaned_thread = await sanitize_failed_section_turn_for_warm_retry(
+                agent=agent,
+                thread_config=thread_config,
+                prompt=prompt,
+            )
+            if not cleaned_thread:
+                print(
+                    f"[graph] Expert '{expert_label}' could not clean warm retry state "
+                    f"for section '{section_title}'. Falling back to a cold retry."
+                )
+                break
+
             if is_context_window_error(error):
                 await _emit_status("compacting", "Compacting Context")
-                await compact_agent_thread_history(
+                compacted = await compact_agent_thread_history(
                     agent=agent,
                     summary_model=summary_model,
                     thread_config=thread_config,
@@ -271,6 +416,24 @@ async def generate_section_with_retry_policy(
                     force=True,
                     timeout_seconds=summary_timeout_seconds,
                 )
+                if not compacted:
+                    try:
+                        cleaned_messages = get_agent_thread_messages(
+                            agent=agent,
+                            thread_config=thread_config,
+                        )
+                    except Exception as inspect_error:
+                        print(
+                            f"[graph] Expert '{expert_label}' could not inspect cleaned warm retry state "
+                            f"for section '{section_title}': {inspect_error}. Falling back to a cold retry."
+                        )
+                        break
+                    if not is_warm_retry_thread_safe(cleaned_messages, prompt):
+                        print(
+                            f"[graph] Expert '{expert_label}' could not compact cleaned warm retry state "
+                            f"for section '{section_title}'. Falling back to a cold retry."
+                        )
+                        break
 
             delay = retry_delay_for_index(section_retry_delays, retry_counter)
             retry_counter += 1
