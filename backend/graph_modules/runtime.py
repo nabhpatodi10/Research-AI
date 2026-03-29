@@ -65,7 +65,7 @@ class ResearchGraph:
         self.__expert_count = expert_count_for_breadth(research_breadth)
         self.__gpt_model = ChatOpenAI(
             model="gpt-5.4-nano" if model_tier == "pro" else "gpt-5-nano",
-            reasoning={"effort": "xhigh"} if model_tier == "pro" else {"effort": "medium"},
+            reasoning={"effort": "high"} if model_tier == "pro" else {"effort": "medium"},
             verbosity=verbosity,
             use_responses_api=True,
             timeout=600.0,
