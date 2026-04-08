@@ -17,7 +17,7 @@
     "echarts-for-react": "^3.0.6",
     "github-markdown-css": "^5.8.1",
     "html2canvas": "^1.4.1",
-    "jspdf": "^4.2.0",
+    "jspdf": "^4.2.1",
     "katex": "^0.16.28",
     "mermaid": "^11.12.3",
     "react": "^19.1.0",
