@@ -26,7 +26,7 @@ Research-AI was evaluated on the [DeepResearch Bench](https://github.com/Ayanami
 - Readability: `0.5253`
 - Overall Score: `0.5532`
 
-With these results, Research-AI is at the **1st position on the leaderboard of DeepResearch Bench**.
+With these results, Research-AI beats **OpenAI Deep Research (o3), Gemini Deep Research (2.5 Pro), Perplexity Deep Research and other major Deep Research platforms**.
 
 ### Leaderboard Comparison Graphs
 
